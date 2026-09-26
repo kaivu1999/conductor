@@ -14,6 +14,8 @@ export interface FakeGit extends Git {
   mergeResult: Awaited<ReturnType<Git['merge']>>;
   createWorktreeHook?: (runId: string) => Promise<void> | void;
   failRemove: boolean;
+  /** What detectTestCommand finds after a run (e.g. the agent added tests to a new project). */
+  laterTestCommand: string | null;
   diskEntries: { path: string }[];
   calls: string[];
 }
@@ -24,6 +26,7 @@ export function createFakeGit(opts: { worktreeRoot: string; repos?: Record<strin
     testResult: { passed: true, exitCode: 0 },
     mergeResult: { ok: true, mergeCommit: 'm'.repeat(40) },
     failRemove: false,
+    laterTestCommand: null,
     diskEntries: [],
 
     async inspectRepo(p) {
@@ -58,7 +61,7 @@ export function createFakeGit(opts: { worktreeRoot: string; repos?: Record<strin
       return { command, passed: true, exitCode: 0, durationMs: 10, output: 'ok', ...g.testResult };
     },
     async detectTestCommand() {
-      return null;
+      return g.laterTestCommand;
     },
     async merge(_repo, branch, baseBranch) {
       g.merges.push({ branch, baseBranch });

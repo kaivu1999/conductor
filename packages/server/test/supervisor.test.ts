@@ -484,3 +484,19 @@ describe('shutdown', () => {
     expect(() => h.agent.last(a.id).emit({ type: 'activity', text: 'late' })).not.toThrow();
   });
 });
+
+describe('test command for new projects', () => {
+  it('detects a test command after the run when none existed at creation', async () => {
+    const h = harness();
+    h.sup.startScheduler();
+    const run = await running(h);
+    h.store.testCommands.set(run.id, null); // e.g. an empty new project
+    h.git.laterTestCommand = 'pytest';
+    h.git.changes.set(run.worktreePath!, ['app.py', 'test_app.py']);
+    h.agent.last(run.id).finish(true);
+    await until(() => state(h, run.id) === 'ready', 2000, 'ready');
+    expect(h.store.getRun(run.id)!.tests?.command).toBe('pytest');
+    expect(h.store.listEvents(run.id).some((e) => e.text === 'Found a test command after the run: pytest.')).toBe(true);
+    await h.sup.shutdown();
+  });
+});

@@ -365,7 +365,12 @@ export function createSupervisor(deps: SupervisorDeps): ConductorSupervisor {
       if (!run.worktreePath || !run.baseCommit) throw new Error('run has no worktree');
       await git.commitAll(run.worktreePath, `conductor: ${run.title}`);
       const diffStat = await git.diffStat(run.worktreePath, run.baseCommit);
-      const testCommand = store.getTestCommand(id);
+      // Nothing detected at creation (a new, empty project)? The agent may have added tests since.
+      let testCommand = store.getTestCommand(id);
+      if (!testCommand && diffStat.files > 0) {
+        testCommand = await git.detectTestCommand(run.worktreePath);
+        if (testCommand) w.event(id, 'system', `Found a test command after the run: ${testCommand}.`);
+      }
       let tests: Run['tests'] = null;
       if (testCommand && diffStat.files > 0) {
         if (!w.patch(id, { activity: `Running tests: ${testCommand}`, activityAt: Date.now(), diffStat })) return;
