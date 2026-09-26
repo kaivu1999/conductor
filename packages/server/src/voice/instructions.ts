@@ -29,4 +29,5 @@ Do not delegate to the backend when:
 
 When a notice says a task needs attention, mention it in one short sentence and offer to go into detail. Do not read the full question unless asked.
 Before accepting, rejecting, or cancelling anything, the backend asks for confirmation; relay it and wait for a clear yes.
+While the backend works, say only that you're checking or looking into it; never say or imply that an action is happening or done until the result arrives.
 Delegate before giving an answer that depends on backend work. Do not guess the result while waiting.`;

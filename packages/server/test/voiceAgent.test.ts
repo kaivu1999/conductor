@@ -19,6 +19,10 @@ function storeWith(...runs: Partial<Run>[]) {
 }
 
 const quiet = { info() {}, warn() {}, error() {} };
+const deps = (store: ReturnType<typeof createMemoryStore>) => ({
+  store, log: quiet, screen() {}, git: { inspectRepo: async () => { throw new Error('unused'); } },
+  supervisor: {} as never, systemInfo: async () => { throw new Error('unused'); },
+});
 
 describe('voice tools', () => {
   const store = storeWith(
@@ -100,18 +104,21 @@ describe('orchestrator', () => {
 
   it('starts one agent per voice session with only the conductor tools', async () => {
     const f = fakeQuery(() => 'ok');
-    const o = createOrchestrator({ store, log: quiet, query: f.q });
-    o.open!('live_1');
+    const o = createOrchestrator({ ...deps(store), query: f.q });
+    o.open!('live_1', new Transcript());
     await o.delegate(request('live_1', 'hi'));
     expect(f.calls).toHaveLength(1);
-    expect(f.calls[0]).toMatchObject({ tools: [], allowedTools: ['mcp__conductor__list_runs', 'mcp__conductor__describe_run'], settingSources: [] });
+    expect(f.calls[0]).toMatchObject({ tools: [], settingSources: [] });
+    const allowed = (f.calls[0] as { allowedTools: string[] }).allowedTools;
+    expect(allowed.every((t) => t.startsWith('mcp__conductor__'))).toBe(true);
+    expect(allowed).toContain('mcp__conductor__accept_run');
     o.close!('live_1');
     expect(f.isClosed()).toBe(true);
   });
 
   it('sends the transcript and task snapshot, and returns the trimmed result', async () => {
     const f = fakeQuery(() => 'Night mode is waiting on you.');
-    const o = createOrchestrator({ store, log: quiet, query: f.q });
+    const o = createOrchestrator({ ...deps(store), query: f.q });
     expect(await o.delegate(request('live_2', 'What needs me?'))).toBe('Night mode is waiting on you.');
     expect(f.prompts[0]).toContain('<transcript>\nuser: What needs me?\n</transcript>');
     expect(f.prompts[0]).toContain('r_night · "Add night mode" · repo tictactoe · waiting on your answer');
@@ -120,7 +127,7 @@ describe('orchestrator', () => {
 
   it('runs overlapping delegations one at a time, in order', async () => {
     const f = fakeQuery((_p, n) => `answer ${n}`, 20);
-    const o = createOrchestrator({ store, log: quiet, query: f.q });
+    const o = createOrchestrator({ ...deps(store), query: f.q });
     const [a, b] = await Promise.all([o.delegate(request('live_3', 'first')), o.delegate(request('live_3', 'second'))]);
     expect([a, b]).toEqual(['answer 1', 'answer 2']);
     expect(f.prompts.map((p) => p.includes('first') ? 'first' : 'second')).toEqual(['first', 'second']);
@@ -140,7 +147,7 @@ describe('orchestrator', () => {
       }
       return Object.assign(run(), { close() {} });
     }) as never;
-    const o = createOrchestrator({ store, log: quiet, query: q });
+    const o = createOrchestrator({ ...deps(store), query: q });
     await expect(o.delegate(request('live_4', 'x'))).rejects.toThrow('CLI crashed');
     expect(await o.delegate(request('live_4', 'x'))).toBe('back');
     expect(n).toBe(2);

@@ -84,7 +84,7 @@ export const httpSource: DataSource = {
     };
     es.onopen = () => h.onOpen();
     // Server names events by `type`; also accept unnamed frames carrying `type` in the payload.
-    for (const t of ['run', 'event', 'system'] as const) es.addEventListener(t, handle);
+    for (const t of ['run', 'event', 'system', 'voice'] as const) es.addEventListener(t, handle);
     es.onmessage = handle;
     es.onerror = () => {
       // Take over reconnection ourselves (backoff + resync) instead of EventSource's silent retry.

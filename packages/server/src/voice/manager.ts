@@ -18,8 +18,8 @@ export interface DelegationRequest {
 
 /** Does the work behind the voice session. */
 export interface VoiceBackend {
-  /** A voice session opened (warm up here). */
-  open?(sessionId: string): void;
+  /** A voice session opened (warm up here). The transcript object lives as long as the session. */
+  open?(sessionId: string, transcript: Transcript): void;
   /** Handle one delegation; returns a short, speakable result. */
   delegate(req: DelegationRequest): Promise<string>;
   /** The voice session ended. */
@@ -147,7 +147,7 @@ export function createVoiceManager(deps: VoiceManagerDeps): VoiceManager {
       const live = await createLiveSession(config, offerSdp, deps.fetch);
       // Attach right away so the transcript is complete from the first word.
       attach(live.sessionId);
-      backend.open?.(live.sessionId);
+      backend.open?.(live.sessionId, sessions.get(live.sessionId)!.transcript);
       log.info(`${live.sessionId}: opened`);
       return live;
     },

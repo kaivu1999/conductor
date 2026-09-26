@@ -17,6 +17,7 @@ import type { Run, RunDiff, RunEvent, DiskUsage } from './types.ts';
  *   GET    /api/repos/inspect?path=      -> RepoInfo                   (validates a path before create)
  *   GET    /api/system                   -> SystemInfo
  *   GET    /api/stream                   Server-Sent Events, see StreamEvent
+ *   POST   /api/voice/session            { sdp } -> { sessionId, sdp }   (GPT-Live WebRTC offer/answer)
  */
 export interface CreateRunBody {
   repoPath: string;
@@ -53,4 +54,8 @@ export interface SystemInfo {
 export type StreamEvent =
   | { type: 'run'; run: Run } // full run snapshot on any change
   | { type: 'event'; event: RunEvent } // new timeline entry
-  | { type: 'system'; system: SystemInfo };
+  | { type: 'system'; system: SystemInfo }
+  | { type: 'voice'; command: VoiceScreenCommand }; // Conductor's voice driving the screen
+
+/** What the voice layer can do to the open UI. */
+export type VoiceScreenCommand = { kind: 'show_run'; runId: string } | { kind: 'show_needs'; on: boolean };

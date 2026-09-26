@@ -49,9 +49,14 @@ const DEFAULT_WEB_DIST = path.resolve(path.dirname(fileURLToPath(import.meta.url
 
 export function buildServer(deps: ServerDeps): FastifyInstance {
   const { supervisor, store, git } = deps;
+  // The hub is created below; screen commands only fire later, from voice turns.
   const voice = deps.voice ?? createVoiceManager({
     config: loadVoiceConfig(),
-    backend: createOrchestrator({ store, model: process.env.CONDUCTOR_VOICE_AGENT_MODEL?.trim() || undefined, log: voiceLog }),
+    backend: createOrchestrator({
+      store, supervisor, git, log: voiceLog, systemInfo: () => supervisor.systemInfo(),
+      model: process.env.CONDUCTOR_VOICE_AGENT_MODEL?.trim() || undefined,
+      screen: (command) => hub.broadcast({ type: 'voice', command }),
+    }),
   });
   const app = Fastify({ logger: deps.logger ?? false, bodyLimit: 1024 * 1024 });
 

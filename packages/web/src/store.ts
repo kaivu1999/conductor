@@ -1,4 +1,4 @@
-import type { Run, RunEvent, StreamEvent, SystemInfo } from '@conductor/shared';
+import type { Run, RunEvent, StreamEvent, SystemInfo, VoiceScreenCommand } from '@conductor/shared';
 import { sortByAttention } from '@conductor/shared';
 import type { DataSource } from './api.ts';
 
@@ -28,6 +28,7 @@ export class ConductorStore {
     droppedAt: null, nextRetryAt: null, loaded: false,
   };
   private listeners = new Set<Listener>();
+  private voiceListeners = new Set<(cmd: VoiceScreenCommand) => void>();
   private closeStream: (() => void) | null = null;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private resortTimer: ReturnType<typeof setInterval> | null = null;
@@ -37,6 +38,12 @@ export class ConductorStore {
   constructor(readonly src: DataSource) {}
 
   getState = (): State => this.state;
+
+  /** Screen commands from Conductor's voice (open a run, filter the list). Not state: one-shot. */
+  onVoiceCommand = (fn: (cmd: VoiceScreenCommand) => void): (() => void) => {
+    this.voiceListeners.add(fn);
+    return () => this.voiceListeners.delete(fn);
+  };
 
   subscribe = (l: Listener): (() => void) => {
     this.listeners.add(l);
@@ -125,6 +132,9 @@ export class ConductorStore {
       }
       case 'system':
         this.set({ system: ev.system });
+        break;
+      case 'voice':
+        for (const fn of this.voiceListeners) fn(ev.command);
         break;
     }
   }

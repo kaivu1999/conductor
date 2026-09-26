@@ -45,6 +45,14 @@ function Shell() {
 
   useEffect(() => { if (filterNeeds && needs.length === 0) setFilterNeeds(false); }, [filterNeeds, needs.length]);
 
+  // Conductor's voice drives the screen: open the task it's talking about, or filter the list.
+  useEffect(() => store.onVoiceCommand((cmd) => {
+    if (cmd.kind === 'show_needs') { setFilterNeeds(cmd.on); return; }
+    const run = store.getState().runs[cmd.runId];
+    if (run && !needsAttention(run, Date.now())) setFilterNeeds(false);
+    select(cmd.runId);
+    requestAnimationFrame(() => document.querySelector(`[data-run-id="${cmd.runId}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }));
+  }), [select]);
 
   // Title shows the count so a background tab still tells you when you're needed.
   useEffect(() => {
