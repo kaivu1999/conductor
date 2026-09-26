@@ -1,7 +1,10 @@
-import { useEffect, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
+import { stripNonSpeech } from '@conductor/shared';
 import { useToast } from '../components/Toasts.tsx';
 import { isMock } from '../useConductor.ts';
-import { VoiceSession, type VoiceState } from './session.ts';
+import { VoiceSession, type Caption, type VoiceState } from './session.ts';
+import { Aurora, fit, type Phase } from './aurora.ts';
 
 export const voice = new VoiceSession();
 
@@ -19,18 +22,24 @@ export function toggleVoice(): void {
 
 const reducedMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
 
-/** Run `draw` every animation frame while `active`. Drawing goes straight to the DOM/canvas, not React state. */
-function useFrame(active: boolean, draw: (t: number) => void) {
+/**
+ * Run `draw` every animation frame of `win` while `active`. Drawing goes straight to the
+ * DOM/canvas, not React state. The pop-out passes its own window: a background tab's
+ * frames stop, the always-on-top window's don't.
+ */
+function useFrame(active: boolean, draw: (t: number) => void, win: Window = window) {
   const ref = useRef(draw);
   ref.current = draw;
   useEffect(() => {
     if (!active) return;
-    let id = requestAnimationFrame(function loop(t) {
-      ref.current(t);
-      id = requestAnimationFrame(loop);
+    let warned = false;
+    let id = win.requestAnimationFrame(function loop(t) {
+      // A drawing bug must not freeze the animation: log once, keep going.
+      try { ref.current(t); } catch (err) { if (!warned) { warned = true; console.error('[voice] frame failed', err); } }
+      id = win.requestAnimationFrame(loop);
     });
-    return () => cancelAnimationFrame(id);
-  }, [active]);
+    return () => win.cancelAnimationFrame(id);
+  }, [active, win]);
 }
 
 // ─── header button ───────────────────────────────────────────────────────────
@@ -88,32 +97,44 @@ export function VoiceButton() {
   );
 }
 
-// ─── dock ────────────────────────────────────────────────────────────────────
+// ─── aurora bar ──────────────────────────────────────────────────────────────
 
-type Phase = 'connecting' | 'listening' | 'hearing' | 'thinking' | 'speaking' | 'muted' | 'closing';
 const PHASE_LABEL: Record<Phase, string> = {
-  connecting: 'Connecting',
+  connecting: 'Tuning up',
   listening: 'Listening',
   hearing: 'Listening',
-  thinking: 'Thinking…',
-  speaking: 'Conductor is speaking',
+  thinking: 'Thinking',
+  speaking: 'Speaking',
   muted: 'Muted',
   closing: 'Ending',
 };
 
-const USER_RGB = [92, 200, 255]; // --review
-const CONDUCTOR_RGB = [124, 140, 255]; // --accent
-const SPEAK_THRESHOLD = 0.06;
-const SPEAK_HOLD_MS = 350;
-const SAMPLE_MS = 70;
-const BAR_W = 3;
-const BAR_GAP = 2;
+/** Normalized level above which a side counts as speaking, and how long it holds the floor after. */
+const SPEAK_AT = 0.16;
+/** Conductor pauses between words and sentences; hold its floor longer so the colour doesn't flicker. */
+const HOLD_MS = { user: 450, conductor: 900 };
 
-interface Sample { v: number; who: 'user' | 'conductor' }
+interface DocumentPictureInPicture { requestWindow(opts?: { width?: number; height?: number }): Promise<Window> }
+const pipApi = (): DocumentPictureInPicture | undefined =>
+  (window as unknown as { documentPictureInPicture?: DocumentPictureInPicture }).documentPictureInPicture;
+
+/** Subtitles show the newest words: a long line keeps its tail, cut at a word. */
+function tail(text: string, max = 150): string {
+  if (text.length <= max) return text;
+  const cut = text.slice(-max);
+  return `…${cut.slice(cut.indexOf(' ') + 1)}`;
+}
+
+/** Spoken lines with the transcriber's "[clear throat]"-style tags removed; empty ones dropped. */
+function spoken(captions: Caption[]): Caption[] {
+  return captions.map((c) => ({ ...c, text: stripNonSpeech(c.text) })).filter((c) => c.text);
+}
 
 /**
- * The open state: a floating dock with a scrolling waveform of the conversation (cyan is
- * you, indigo is Conductor), what's happening now, and the last few lines.
+ * The live conversation: a band of light along the bottom edge whose colour and motion are
+ * the state (teal listening, brighter as you speak, violet thinking, magenta when Conductor
+ * speaks, grey muted, amber connecting), one line of subtitles above it, and the controls
+ * at its ends. Pops out into a small always-on-top orb where the browser allows it.
  */
 export function VoiceDock() {
   const status = useVoice((s) => s.status);
@@ -121,138 +142,181 @@ export function VoiceDock() {
   const thinking = useVoice((s) => s.thinking);
   const captions = useVoice((s) => s.captions);
   const [mounted, setMounted] = useState(false);
-  const [speaking, setSpeaking] = useState<'user' | 'conductor' | null>(null);
-  const canvas = useRef<HTMLCanvasElement>(null);
-  const history = useRef<Sample[]>([]);
-  const lastSample = useRef(0);
-  const lastHeard = useRef({ user: 0, conductor: 0 });
-
-  // Stay mounted through the exit animation.
-  useEffect(() => {
-    if (status !== 'idle') { setMounted(true); return; }
-    const t = setTimeout(() => { setMounted(false); history.current = []; }, reducedMotion() ? 0 : 320);
-    return () => clearTimeout(t);
-  }, [status]);
+  const [who, setWho] = useState<'user' | 'conductor' | null>(null);
+  const [expanded, setExpanded] = useState(false);
+  const [pip, setPip] = useState<Window | null>(null);
+  const band = useRef<HTMLCanvasElement>(null);
+  const orb = useRef<HTMLCanvasElement>(null);
+  const aurora = useRef<Aurora | null>(null);
+  aurora.current ??= new Aurora();
+  const heard = useRef({ user: 0, conductor: 0 });
 
   const open = status !== 'idle';
   const phase: Phase = status === 'connecting' ? 'connecting'
     : status === 'closing' || status === 'idle' ? 'closing'
-    : speaking === 'conductor' ? 'speaking'
+    : who === 'conductor' ? 'speaking'
     : muted ? 'muted'
     : thinking ? 'thinking'
-    : speaking === 'user' ? 'hearing'
+    : who === 'user' ? 'hearing'
     : 'listening';
+  const phaseRef = useRef(phase);
+  phaseRef.current = phase;
+
+  // Stay mounted through the exit animation.
+  useEffect(() => {
+    if (status !== 'idle') { setMounted(true); return; }
+    setExpanded(false);
+    const t = setTimeout(() => setMounted(false), reducedMotion() ? 0 : 420);
+    return () => clearTimeout(t);
+  }, [status]);
+
+  // Ending the conversation closes the pop-out; closing the pop-out does not end it.
+  useEffect(() => { if (status === 'idle' && pip) pip.close(); }, [status, pip]);
 
   useFrame(mounted, (t) => {
-    const cv = canvas.current;
-    if (!cv) return;
+    const a = aurora.current!;
+    a.still = reducedMotion();
     const { user, conductor } = voice.levels();
-    if (user > SPEAK_THRESHOLD) lastHeard.current.user = t;
-    if (conductor > SPEAK_THRESHOLD) lastHeard.current.conductor = t;
-    const now: 'user' | 'conductor' | null = t - lastHeard.current.conductor < SPEAK_HOLD_MS ? 'conductor'
-      : t - lastHeard.current.user < SPEAK_HOLD_MS ? 'user' : null;
-    setSpeaking((prev) => (prev === now ? prev : now));
-
-    const dpr = window.devicePixelRatio || 1;
-    const w = cv.clientWidth;
-    const h = cv.clientHeight;
-    if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) {
-      cv.width = Math.round(w * dpr);
-      cv.height = Math.round(h * dpr);
+    if (conductor > SPEAK_AT) heard.current.conductor = t;
+    if (user > SPEAK_AT) heard.current.user = t;
+    const now = t - heard.current.conductor < HOLD_MS.conductor ? 'conductor' : t - heard.current.user < HOLD_MS.user ? 'user' : null;
+    setWho((prev) => (prev === now ? prev : now));
+    const ph = phaseRef.current;
+    const level = ph === 'speaking' ? conductor : ph === 'hearing' || ph === 'listening' ? user : 0;
+    a.update(ph, level, t, voice.getState().status !== 'idle' && voice.getState().status !== 'closing');
+    if (band.current && !pip) {
+      const { w, h } = fit(band.current);
+      a.drawBand(band.current.getContext('2d')!, w, h);
     }
-    const n = Math.floor(w / (BAR_W + BAR_GAP));
-    if (t - lastSample.current >= SAMPLE_MS) {
-      lastSample.current = t;
-      history.current.push({ v: Math.max(user, conductor), who: conductor >= user ? 'conductor' : 'user' });
-      if (history.current.length > n) history.current.splice(0, history.current.length - n);
+    if (orb.current && pip) {
+      const { w } = fit(orb.current, pip);
+      a.drawOrb(orb.current.getContext('2d')!, w, Math.max(user, conductor));
     }
+  }, pip ?? window);
 
-    const g = cv.getContext('2d')!;
-    g.setTransform(dpr, 0, 0, dpr, 0, 0);
-    g.clearRect(0, 0, w, h);
-    // A faint five-line staff behind the music.
-    g.fillStyle = 'rgba(255,255,255,0.045)';
-    for (let i = 0; i < 5; i++) g.fillRect(0, Math.round(h * (0.18 + i * 0.16)), w, 1);
-
-    const mid = h / 2;
-    const hist = history.current;
-    const offset = n - hist.length; // new bars enter from the right
-    const sweep = voice.getState().thinking && !reducedMotion() ? ((t / 1400) % 1) * n : -1;
-    for (let i = 0; i < n; i++) {
-      const s = hist[i - offset];
-      const x = i * (BAR_W + BAR_GAP);
-      const age = i / n; // 0 = oldest (left), 1 = now (right)
-      const baton = sweep >= 0 ? Math.exp(-(((i - sweep) / 5) ** 2)) : 0;
-      const v = Math.max(s?.v ?? 0, baton * 0.22);
-      if (v < 0.02) {
-        g.fillStyle = `rgba(169,175,184,${0.1 + 0.12 * age})`;
-        g.fillRect(x, mid - 1, BAR_W, 2);
-        continue;
-      }
-      const bh = Math.max(2, Math.pow(v, 0.7) * h * 0.86);
-      const [r, gg, b] = s && s.v >= baton * 0.22 && s.who === 'user' ? USER_RGB : CONDUCTOR_RGB;
-      g.fillStyle = `rgba(${r},${gg},${b},${0.28 + 0.72 * age})`;
-      roundBar(g, x, mid - bh / 2, BAR_W, bh);
+  async function popOut() {
+    const api = pipApi();
+    if (!api || pip) return;
+    try {
+      const win = await api.requestWindow({ width: 220, height: 260 });
+      copyStyles(document, win.document);
+      win.document.title = 'Conductor';
+      win.document.body.className = 'pip-body';
+      win.addEventListener('keydown', (e) => {
+        if (e.key === 'm') voice.toggleMute();
+        else if (e.key === 'v' || e.key === 'Escape') voice.stop();
+      });
+      win.addEventListener('pagehide', () => setPip(null), { once: true });
+      setPip(win);
+    } catch (err) {
+      console.warn('[voice] pop-out failed', err);
     }
-  });
+  }
 
   if (!mounted) return null;
-  const lines = captions.slice(-3);
-  return (
-    <div
-      className={`dock dock--${phase}${open ? ' dock--open' : ' dock--leaving'}`}
-      role="region"
-      aria-label="Conductor voice conversation"
+  const lines = spoken(captions);
+  const latest = lines.at(-1) ?? null;
+  const hint = status === 'connecting' ? 'Tuning up…' : 'Try “What needs me?”';
+  const tint = phase === 'hearing' || (phase !== 'speaking' && latest?.role === 'user') ? 'user' : 'conductor';
+
+  const mic = (
+    <button
+      className={`au-btn${muted ? ' au-btn--on' : ''}`}
+      onClick={() => voice.toggleMute()}
+      disabled={status !== 'live'}
+      aria-pressed={muted}
+      title={muted ? 'Unmute (m)' : 'Mute (m)'}
+      aria-label={muted ? 'Unmute' : 'Mute'}
     >
-      <div className="dock__head">
-        <span className="dock__mark">Conductor</span>
-        <span className="dock__status" aria-live="polite"><i />{PHASE_LABEL[phase]}</span>
-        <span className="spacer" />
-        <button
-          className={`dock__btn${muted ? ' dock__btn--on' : ''}`}
-          onClick={() => voice.toggleMute()}
-          disabled={status !== 'live'}
-          aria-pressed={muted}
-          title={muted ? 'Unmute (m)' : 'Mute (m)'}
-        >
-          {muted ? <MicOffIcon /> : <MicIcon />}
-          <span>{muted ? 'Unmute' : 'Mute'}</span>
-          <kbd>m</kbd>
-        </button>
-        <button className="dock__btn dock__btn--end" onClick={() => voice.stop()} disabled={!open} title="End the conversation (v)">
-          <EndIcon /><span>End</span>
-        </button>
-      </div>
-      <div className="dock__wave"><canvas ref={canvas} /></div>
-      <div className="dock__captions" aria-live="polite">
-        {lines.length === 0 ? (
-          <p className="dock__hint">{status === 'connecting' ? 'Tuning up…' : <>Try <q>What needs me?</q> or <q>What’s running?</q></>}</p>
+      {muted ? <MicOffIcon /> : <MicIcon />}
+    </button>
+  );
+  const end = (
+    <button className="au-btn au-btn--end" onClick={() => voice.stop()} disabled={!open} title="End the conversation (v)" aria-label="End the conversation">
+      <EndIcon />
+    </button>
+  );
+
+  return (
+    <>
+      <div
+        className={`aurora aurora--${phase}${open ? ' aurora--open' : ' aurora--leaving'}${pip ? ' aurora--popped' : ''}`}
+        role="region"
+        aria-label="Conversation with Conductor"
+      >
+        <canvas ref={band} className="aurora__light" aria-hidden />
+        {expanded && lines.length > 0 ? (
+          // The transcript takes the subtitle's place; clicking it folds back to one line.
+          <button className="aurora__transcript" onClick={() => setExpanded(false)} aria-expanded title="Hide transcript" aria-label="Transcript">
+            {lines.slice(-8).map((c, i, arr) => (
+              <p key={c.id} className={`au-line au-line--${c.role}`}>
+                <span className="au-line__who">{arr[i - 1]?.role === c.role ? '' : c.role === 'user' ? 'You' : 'Conductor'}</span>
+                <span className="au-line__text">{c.text}</span>
+              </p>
+            ))}
+          </button>
         ) : (
-          lines.map((c, i) => (
-            <p key={c.id} className={`line line--${c.role}`}>
-              {/* Name the speaker once per run of lines. */}
-              <span className="line__who">{lines[i - 1]?.role === c.role ? '' : c.role === 'user' ? 'You' : 'Conductor'}</span>
-              <span className="line__text">{c.text}</span>
-            </p>
-          ))
+          <button
+            className={`aurora__subtitle aurora__subtitle--${tint}${latest ? '' : ' aurora__subtitle--hint'}`}
+            onClick={() => lines.length && setExpanded(true)}
+            aria-expanded={false}
+            title={lines.length ? 'Show transcript' : undefined}
+            aria-live="polite"
+          >
+            <span key={latest?.id ?? 'hint'} className="aurora__subtitle-text">{latest ? tail(latest.text) : hint}</span>
+          </button>
         )}
+        <div className="aurora__bar">
+          {mic}
+          <span className="aurora__mark">Conductor</span>
+          <span className="aurora__status">{pip ? 'In its own window' : PHASE_LABEL[phase]}</span>
+          <span className="spacer" />
+          {pipApi() && (
+            pip
+              ? <button className="au-btn" onClick={() => pip.close()} title="Bring Conductor back into the page" aria-label="Bring back"><PopInIcon /></button>
+              : <button className="au-btn" onClick={() => void popOut()} disabled={!open} title="Pop out into a small floating window" aria-label="Pop out"><PopOutIcon /></button>
+          )}
+          {end}
+        </div>
       </div>
+      {pip && createPortal(
+        <PipOrb phase={phase} line={latest ? tail(latest.text, 90) : hint} canvas={orb} mic={mic} end={end} />,
+        pip.document.body,
+      )}
+    </>
+  );
+}
+
+/** The pop-out: just the voice. A small orb of the same light, the latest line, mute and end. */
+function PipOrb({ phase, line, canvas, mic, end }: { phase: Phase; line: string; canvas: React.RefObject<HTMLCanvasElement>; mic: ReactNode; end: ReactNode }) {
+  return (
+    <div className={`pip pip--${phase}`}>
+      <canvas ref={canvas} className="pip__orb" title={line} />
+      <p className="pip__status">{PHASE_LABEL[phase]}</p>
+      <p className="pip__line" title={line}>{line}</p>
+      <div className="pip__controls">{mic}{end}</div>
     </div>
   );
 }
 
-function roundBar(g: CanvasRenderingContext2D, x: number, y: number, w: number, h: number) {
-  const r = Math.min(w / 2, h / 2);
-  g.beginPath();
-  g.moveTo(x + r, y);
-  g.arcTo(x + w, y, x + w, y + h, r);
-  g.arcTo(x + w, y + h, x, y + h, r);
-  g.arcTo(x, y + h, x, y, r);
-  g.arcTo(x, y, x + w, y, r);
-  g.fill();
+/** A Picture-in-Picture document starts empty: bring the page's styles along. */
+function copyStyles(from: Document, to: Document) {
+  for (const sheet of Array.from(from.styleSheets)) {
+    try {
+      const style = to.createElement('style');
+      style.textContent = Array.from(sheet.cssRules).map((r) => r.cssText).join('\n');
+      to.head.appendChild(style);
+    } catch {
+      if (!sheet.href) continue;
+      const link = to.createElement('link');
+      link.rel = 'stylesheet';
+      link.href = sheet.href;
+      to.head.appendChild(link);
+    }
+  }
 }
 
-const icon = { width: 14, height: 14, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const, 'aria-hidden': true };
+const icon = { width: 15, height: 15, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const, 'aria-hidden': true };
 const MicIcon = () => (
   <svg {...icon}><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" /></svg>
 );
@@ -261,4 +325,10 @@ const MicOffIcon = () => (
 );
 const EndIcon = () => (
   <svg {...icon}><path d="M6 6l12 12M18 6L6 18" /></svg>
+);
+const PopOutIcon = () => (
+  <svg {...icon}><path d="M14 4h6v6M20 4l-8 8M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4" /></svg>
+);
+const PopInIcon = () => (
+  <svg {...icon}><path d="M4 14h6v6M10 14l-7 7M18 4H8a2 2 0 0 0-2 2v4M20 8v10a2 2 0 0 1-2 2h-4" /></svg>
 );
