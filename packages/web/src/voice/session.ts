@@ -14,13 +14,32 @@ export interface VoiceState {
   status: VoiceStatus;
   captions: Caption[];
   error: string | null;
+  /** Mic muted, as confirmed by the session (`session.input_audio.muted`). */
+  muted: boolean;
+  /** Between a delegation and its result reaching the voice: Conductor is working something out. */
+  thinking: boolean;
 }
+
+/** Loudness of each side right now, 0..1 (RMS, lightly boosted for display). */
+export interface Levels { user: number; conductor: number }
 
 const MAX_CAPTIONS = 6;
 const CLOSE_TIMEOUT_MS = 3000;
+/** Clear a stuck "thinking" if the result never arrives. */
+const THINKING_TIMEOUT_MS = 30_000;
+const NOISE_FLOOR = 0.012;
+
+function rms(an: AnalyserNode | null, buf: Float32Array<ArrayBuffer>): number {
+  if (!an) return 0;
+  an.getFloatTimeDomainData(buf);
+  let sum = 0;
+  for (let i = 0; i < buf.length; i++) sum += buf[i]! * buf[i]!;
+  // Gate out room noise so silence draws as silence.
+  return Math.min(1, Math.max(0, Math.sqrt(sum / buf.length) - NOISE_FLOOR) * 4.5);
+}
 
 export class VoiceSession {
-  private state: VoiceState = { status: 'idle', captions: [], error: null };
+  private state: VoiceState = { status: 'idle', captions: [], error: null, muted: false, thinking: false };
   private listeners = new Set<() => void>();
   private pc: RTCPeerConnection | null = null;
   private dc: RTCDataChannel | null = null;
@@ -28,6 +47,11 @@ export class VoiceSession {
   private audio: HTMLAudioElement | null = null;
   private captionId = 1;
   private closeTimer: ReturnType<typeof setTimeout> | null = null;
+  private thinkingTimer: ReturnType<typeof setTimeout> | null = null;
+  private ctx: AudioContext | null = null;
+  private userAn: AnalyserNode | null = null;
+  private conductorAn: AnalyserNode | null = null;
+  private buf = new Float32Array(new ArrayBuffer(1024 * 4));
 
   subscribe = (fn: () => void): (() => void) => {
     this.listeners.add(fn);
@@ -42,14 +66,23 @@ export class VoiceSession {
 
   async start(): Promise<void> {
     if (this.state.status !== 'idle') return;
-    this.set({ status: 'connecting', captions: [], error: null });
+    this.set({ status: 'connecting', captions: [], error: null, muted: false, thinking: false });
     try {
+      // Created inside the click, so the browser lets it run.
+      this.ctx = new AudioContext();
       this.mic = await navigator.mediaDevices.getUserMedia({ audio: true });
+      this.userAn = this.analyser(this.mic);
       const pc = new RTCPeerConnection();
       this.pc = pc;
       this.audio = new Audio();
       this.audio.autoplay = true;
-      pc.ontrack = (e) => { if (this.audio) this.audio.srcObject = e.streams[0] ?? new MediaStream([e.track]); };
+      pc.ontrack = (e) => {
+        const stream = e.streams[0] ?? new MediaStream([e.track]);
+        // Playback stays on the <audio> element (Chrome only feeds a remote stream to Web
+        // Audio while it is also playing); the analyser just listens.
+        if (this.audio) this.audio.srcObject = stream;
+        this.conductorAn = this.analyser(stream);
+      };
       pc.onconnectionstatechange = () => {
         if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') this.fail('Voice connection dropped.');
       };
@@ -70,6 +103,37 @@ export class VoiceSession {
         ? 'Microphone access was denied. Allow it in the browser to use voice.'
         : err instanceof Error ? err.message : String(err));
     }
+  }
+
+  /** Current loudness of the user's mic and of Conductor's voice. Cheap; call per frame. */
+  levels(): Levels {
+    return { user: this.state.muted ? 0 : rms(this.userAn, this.buf), conductor: rms(this.conductorAn, this.buf) };
+  }
+
+  /** Mute or unmute the mic. The session confirms; the local track is cut at once regardless. */
+  setMuted(muted: boolean): void {
+    if (this.state.status !== 'live' || this.dc?.readyState !== 'open') return;
+    for (const t of this.mic?.getAudioTracks() ?? []) t.enabled = !muted;
+    this.dc.send(JSON.stringify({ type: muted ? 'session.input_audio.mute' : 'session.input_audio.unmute' }));
+  }
+
+  toggleMute(): void {
+    this.setMuted(!this.state.muted);
+  }
+
+  private analyser(stream: MediaStream): AnalyserNode | null {
+    if (!this.ctx) return null;
+    const an = this.ctx.createAnalyser();
+    an.fftSize = 1024;
+    an.smoothingTimeConstant = 0.6;
+    this.ctx.createMediaStreamSource(stream).connect(an);
+    return an;
+  }
+
+  private setThinking(on: boolean) {
+    if (this.thinkingTimer) clearTimeout(this.thinkingTimer);
+    this.thinkingTimer = on ? setTimeout(() => this.set({ thinking: false }), THINKING_TIMEOUT_MS) : null;
+    if (this.state.thinking !== on) this.set({ thinking: on });
   }
 
   /** Ask the session to close gracefully; tear down locally if it doesn't confirm in time. */
@@ -96,6 +160,19 @@ export class VoiceSession {
         break;
       case 'session.output_transcript.delta':
         this.caption('assistant', ev as unknown as TranscriptDelta);
+        break;
+      case 'session.delegation.created':
+        this.setThinking(true);
+        break;
+      case 'session.commentary.appended':
+        this.setThinking(false);
+        break;
+      case 'session.input_audio.muted':
+        this.set({ muted: true });
+        break;
+      case 'session.input_audio.unmuted':
+        for (const t of this.mic?.getAudioTracks() ?? []) t.enabled = true;
+        this.set({ muted: false });
         break;
       case 'session.closed':
         this.teardown();
@@ -124,6 +201,8 @@ export class VoiceSession {
   private teardown() {
     if (this.closeTimer) clearTimeout(this.closeTimer);
     this.closeTimer = null;
+    if (this.thinkingTimer) clearTimeout(this.thinkingTimer);
+    this.thinkingTimer = null;
     this.dc?.close();
     this.pc?.close();
     for (const t of this.mic?.getTracks() ?? []) t.stop();
@@ -132,7 +211,11 @@ export class VoiceSession {
     this.pc = null;
     this.mic = null;
     this.audio = null;
-    this.set({ status: 'idle' });
+    void this.ctx?.close();
+    this.ctx = null;
+    this.userAn = null;
+    this.conductorAn = null;
+    this.set({ status: 'idle', muted: false, thinking: false });
   }
 }
 

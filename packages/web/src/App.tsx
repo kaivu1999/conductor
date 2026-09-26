@@ -8,7 +8,7 @@ import { ToastProvider } from './components/Toasts.tsx';
 import { GROUP_ORDER, groupOf } from './stateMeta.ts';
 import { store, useConductor, useNow } from './useConductor.ts';
 import { useHashSelection } from './useHashSelection.ts';
-import { Captions } from './voice/VoiceControls.tsx';
+import { toggleVoice, useVoice, voice, VoiceDock } from './voice/VoiceControls.tsx';
 
 export function App() {
   return (
@@ -32,6 +32,7 @@ function Shell() {
   const [filterNeeds, setFilterNeeds] = useState(false);
   const [newOpen, setNewOpen] = useState(false);
   const detail = useRef<RunDetailHandle>(null);
+  const voiceLive = useVoice((s) => s.status === 'live');
 
   const needs = useMemo(() => sorted.filter((r) => needsAttention(r, now)), [sorted, now]);
   // Visual order = group order (matches what the list renders), used for j/k.
@@ -43,6 +44,7 @@ function Shell() {
   const knownRepos = useMemo(() => [...new Set(sorted.map((r) => r.repoPath))], [sorted]);
 
   useEffect(() => { if (filterNeeds && needs.length === 0) setFilterNeeds(false); }, [filterNeeds, needs.length]);
+
 
   // Title shows the count so a background tab still tells you when you're needed.
   useEffect(() => {
@@ -66,6 +68,8 @@ function Shell() {
       else if (e.key === 'k' || e.key === 'ArrowUp') { e.preventDefault(); move(-1); }
       else if (e.key === 'Enter' && idx === -1 && visible[0]) select(visible[0].id);
       else if (e.key === 'n') { e.preventDefault(); setNewOpen(true); }
+      else if (e.key === 'v') { e.preventDefault(); toggleVoice(); }
+      else if (e.key === 'm' && voice.getState().status === 'live') { e.preventDefault(); voice.toggleMute(); }
       else if (e.key === 'a') {
         // Jump to the most urgent question if the current run isn't asking one.
         const target = selected?.state === 'waiting_input' ? selected : sorted.find((r) => r.state === 'waiting_input');
@@ -93,7 +97,6 @@ function Shell() {
       {conn === 'reconnecting' && (
         <div className="offline-bar">Lost connection to the conductor server — showing last known state. Reconnecting automatically…</div>
       )}
-      <Captions />
       <main className="panes">
         <aside className="pane pane--list">
           {!loaded ? <div className="muted pad">Loading runs…</div> : (
@@ -122,10 +125,13 @@ function Shell() {
         <span><kbd>j</kbd>/<kbd>k</kbd> move</span>
         <span><kbd>a</kbd> answer</span>
         <span><kbd>n</kbd> new run</span>
+        <span><kbd>v</kbd> talk</span>
+        {voiceLive && <span><kbd>m</kbd> mute</span>}
         <span><kbd>esc</kbd> deselect</span>
         {system && <span className="spacer" />}
         {system && <span className="muted">v{system.version}</span>}
       </footer>
+      <VoiceDock />
       {newOpen && (
         <NewRunDialog
           knownRepos={knownRepos}
