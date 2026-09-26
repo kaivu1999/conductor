@@ -1,11 +1,14 @@
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Run, VoiceScreenCommand } from '@conductor/shared';
 import { ConfirmGate, saidYes } from '../src/voice/confirm.ts';
 import {
-  acceptRun, answerQuestion, cancelRun, messageRun, rejectRun, resolveRepo, showNeeds, showRun, startRuns, type ToolContext,
+  acceptRun, answerQuestion, cancelRun, createProject, messageRun, openNewRun, rejectRun, resolveRepo, showNeeds, showRun, startRuns, type ToolContext,
 } from '../src/voice/tools.ts';
 import { Transcript } from '../src/voice/transcript.ts';
+import { createProjects } from '../src/projects.ts';
 import { makeHarness, until, REPO } from './helpers/index.ts';
 
 const cleanups: (() => void | Promise<void>)[] = [];
@@ -71,7 +74,7 @@ describe('voice actions', () => {
     h.sup.startScheduler();
     cleanups.push(async () => { await h.sup.shutdown(); fs.rmSync(h.config.dataDir, { recursive: true, force: true }); });
     const screen: VoiceScreenCommand[] = [];
-    const ctx: ToolContext = { store: h.store, supervisor: h.sup, git: h.git, confirm: new ConfirmGate(), transcript: new Transcript(), screen: (c) => screen.push(c) };
+    const ctx: ToolContext = { store: h.store, supervisor: h.sup, git: h.git, confirm: new ConfirmGate(), projects: createProjects(null), transcript: new Transcript(), screen: (c) => screen.push(c) };
     const state = (id: string) => h.store.getRun(id)!.state;
     return { h, ctx, screen, state };
   }
@@ -164,5 +167,69 @@ describe('voice actions', () => {
     expect((await showRun(s.ctx, 'night')).text).toBe('"Add night mode" is open on screen.');
     showNeeds(s.ctx, true);
     expect(s.screen).toEqual([{ kind: 'show_run', runId: run.id }, { kind: 'show_needs', on: true }]);
+  });
+
+  describe('projects folder', () => {
+    function withProjects() {
+      const s = setup();
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), 'conductor-voice-projects-'));
+      cleanups.push(() => fs.rmSync(root, { recursive: true, force: true }));
+      s.ctx.projects = createProjects(root);
+      // The fake git only knows REPO; treat anything in the projects folder as a fresh repo.
+      const inspect = s.h.git.inspectRepo.bind(s.h.git);
+      s.h.git.inspectRepo = async (p) => p.startsWith(root)
+        ? { path: p, name: path.basename(p), isGitRepo: true, currentBranch: 'main', branches: ['main'], dirty: false, detectedTestCommand: null }
+        : inspect(p);
+      return { ...s, root };
+    }
+
+    it('matches spoken repo names against folders in it', async () => {
+      const s = withProjects();
+      await s.ctx.projects.create('tictactoe');
+      expect(await resolveRepo(s.ctx, 'tic tac toe')).toEqual({ path: path.join(s.root, 'tictactoe') });
+    });
+
+    it('creates a project only after a spoken yes, then starts its first task', async () => {
+      const s = withProjects();
+      const t = s.ctx.transcript;
+      talk(t, 'user', 'Start a new project called weather app: a CLI for the forecast.');
+      const first = await createProject(s.ctx, 'Weather App', ['A CLI that shows the forecast']);
+      expect(first.text).toContain('"Create a new project called weather app in');
+      expect(fs.existsSync(path.join(s.root, 'weather-app'))).toBe(false);
+      const token = /confirm_token "(c_[0-9a-f]+)"/.exec(first.text)![1]!;
+      talk(t, 'assistant', 'Create a new project called weather app?');
+      talk(t, 'user', 'Yes.');
+      const done = await createProject(s.ctx, 'weather app', ['A CLI that shows the forecast'], token);
+      expect(done.text).toMatch(/^Created project weather-app at .*weather-app\. Started "A CLI that shows the forecast" in weather-app/);
+      expect(s.h.store.listRuns()[0]!.repoPath).toBe(path.join(s.root, 'weather-app'));
+      expect(s.screen.at(-1)).toMatchObject({ kind: 'show_run' });
+    });
+
+    it('starts only the first task in a brand-new project', async () => {
+      const s = withProjects();
+      const token = /confirm_token "(c_[0-9a-f]+)"/.exec((await createProject(s.ctx, 'site', ['Scaffold a Vite app', 'Add a blog'])).text)![1]!;
+      talk(s.ctx.transcript, 'user', 'yes');
+      const done = await createProject(s.ctx, 'site', ['Scaffold a Vite app', 'Add a blog'], token);
+      expect(s.h.store.listRuns().map((r) => r.title)).toEqual(['Scaffold a Vite app']);
+      expect(done.text).toContain('Holding 1 more task until the first is merged');
+    });
+
+    it('explains what to do when no folder is configured', async () => {
+      const s = setup();
+      expect((await createProject(s.ctx, 'x')).text).toMatch(/No projects folder is set/);
+    });
+
+    it('opens the New run window with what is known', async () => {
+      const s = withProjects();
+      await s.ctx.projects.create('tictactoe');
+      await openNewRun(s.ctx, { repo: 'tictactoe', task: 'Add night mode' });
+      await openNewRun(s.ctx, { newProject: 'Weather App' });
+      await openNewRun(s.ctx, { repo: 'something unheard of' });
+      expect(s.screen).toEqual([
+        { kind: 'new_run', repoPath: path.join(s.root, 'tictactoe'), task: 'Add night mode' },
+        { kind: 'new_run', newProject: 'weather-app' },
+        { kind: 'new_run' },
+      ]);
+    });
   });
 });

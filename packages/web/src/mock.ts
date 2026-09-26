@@ -3,8 +3,9 @@
  * Covers every interesting state and simulates live activity.
  * `window.conductorMock.drop(ms)` simulates the server dying for `ms` (default 6s).
  */
+import { slugify } from '@conductor/shared';
 import type {
-  CreateRunBody, FileDiff, RepoInfo, Run, RunDiff, RunEvent, RunState, StreamEvent, SystemInfo,
+  CreatedProject, CreateRunBody, FileDiff, ProjectsInfo, RepoInfo, Run, RunDiff, RunEvent, RunState, StreamEvent, SystemInfo,
 } from '@conductor/shared';
 import { isLive } from '@conductor/shared';
 import { ApiError, type DataSource, type StreamHandlers } from './api.ts';
@@ -395,6 +396,14 @@ export function createMockSource(): DataSource {
       if (!path.startsWith('/')) return { path, name, isGitRepo: false, currentBranch: null, branches: [], dirty: false, detectedTestCommand: null, error: 'Path must be absolute.' };
       if (name.includes('not')) return { path, name, isGitRepo: false, currentBranch: null, branches: [], dirty: false, detectedTestCommand: null, error: `${path} is not a git repository.` };
       return { path, name, isGitRepo: true, currentBranch: 'main', branches: ['main', 'develop', 'release/2.4'], dirty: name.includes('web'), detectedTestCommand: 'pnpm test' };
+    }),
+    projects: () => call((): ProjectsInfo => ({
+      dir: '/Users/dev/code',
+      projects: ['acme-api', 'web-app', 'infra'].map((name) => ({ name, path: `/Users/dev/code/${name}` })),
+    })),
+    createProject: (name) => call((): CreatedProject => {
+      const slug = slugify(name);
+      return { name: slug, path: `/Users/dev/code/${slug}`, existed: ['acme-api', 'web-app', 'infra'].includes(slug) };
     }),
     system: () => call(system),
     stream(h) {

@@ -11,11 +11,12 @@ import { z } from 'zod';
 import { sortByAttention, type Run } from '@conductor/shared';
 import type { Git, Store } from '../contracts.ts';
 import type { ConductorSupervisor } from '../supervisor/supervisor.ts';
-import { notFound, conflict } from '../supervisor/errors.ts';
+import { notFound, conflict, badRequest, errorMessage } from '../supervisor/errors.ts';
 import { toHttpError } from './errors.ts';
 import { createSseHub } from './sse.ts';
 import { loadVoiceConfig } from '../voice/live.ts';
 import { createVoiceManager, voiceLog, type VoiceManager } from '../voice/manager.ts';
+import { createProjects, loadProjectsDir, type Projects } from '../projects.ts';
 import { createOrchestrator } from '../voice/orchestrator.ts';
 import { createAttentionWatcher, NUDGE_STATES, toNotice } from '../voice/notifier.ts';
 
@@ -28,6 +29,8 @@ export interface ServerDeps {
   webDist?: string;
   logger?: boolean;
   systemEveryMs?: number;
+  /** Projects folder (default: CONDUCTOR_PROJECTS_DIR). */
+  projects?: Projects;
   /** Voice sessions (default: GPT-Live configured from process.env). */
   voice?: VoiceManager;
 }
@@ -43,6 +46,7 @@ const MessageBody = z.object({ text: z.string().trim().min(1, 'message is empty'
 const AcceptBody = z.object({ mode: z.enum(['merge', 'branch']).default('merge') }).default({});
 const IdParams = z.object({ id: z.string().min(1) });
 const EventsQuery = z.object({ after: z.coerce.number().int().min(0).default(0), limit: z.coerce.number().int().min(1).max(5000).default(1000) });
+const CreateProjectBody = z.object({ name: z.string().trim().min(1, 'name is required').max(200) });
 const VoiceSessionBody = z.object({ sdp: z.string().min(1, 'sdp is required').max(100_000) });
 const InspectQuery = z.object({ path: z.string().trim().min(1, 'path is required') });
 
@@ -50,11 +54,12 @@ const DEFAULT_WEB_DIST = path.resolve(path.dirname(fileURLToPath(import.meta.url
 
 export function buildServer(deps: ServerDeps): FastifyInstance {
   const { supervisor, store, git } = deps;
+  const projects = deps.projects ?? createProjects(loadProjectsDir());
   // The hub is created below; screen commands only fire later, from voice turns.
   const voice = deps.voice ?? createVoiceManager({
     config: loadVoiceConfig(),
     backend: createOrchestrator({
-      store, supervisor, git, log: voiceLog, systemInfo: () => supervisor.systemInfo(),
+      store, supervisor, git, projects, log: voiceLog, systemInfo: () => supervisor.systemInfo(),
       model: process.env.CONDUCTOR_VOICE_AGENT_MODEL?.trim() || undefined,
       screen: (command) => hub.broadcast({ type: 'voice', command }),
     }),
@@ -147,6 +152,19 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     api.post('/runs/:id/reject', async (req) => ({ run: await supervisor.reject(IdParams.parse(req.params).id) }));
 
     api.get('/repos/inspect', async (req) => git.inspectRepo(InspectQuery.parse(req.query).path));
+
+    api.get('/projects', async () => ({ dir: projects.dir, projects: await projects.list() }));
+
+    api.post('/projects', async (req, reply) => {
+      const { name } = CreateProjectBody.parse(req.body ?? {});
+      if (!projects.dir) throw badRequest('No projects folder is set. Set CONDUCTOR_PROJECTS_DIR (for example in .env) and restart conductor.');
+      try {
+        const made = await projects.create(name);
+        return reply.status(made.existed ? 200 : 201).send(made);
+      } catch (err) {
+        throw conflict(errorMessage(err));
+      }
+    });
 
     api.get('/system', async () => supervisor.systemInfo());
 

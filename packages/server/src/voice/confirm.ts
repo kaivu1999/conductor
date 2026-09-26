@@ -8,7 +8,7 @@ import { randomBytes } from 'node:crypto';
 import { stripNonSpeech } from '@conductor/shared';
 import type { Transcript } from './transcript.ts';
 
-export type ConfirmAction = 'accept_merge' | 'accept_branch' | 'reject' | 'cancel';
+export type ConfirmAction = 'accept_merge' | 'accept_branch' | 'reject' | 'cancel' | 'create_project';
 
 interface Pending { action: ConfirmAction; runId: string; expiresAt: number; afterLineId: number }
 
@@ -27,7 +27,10 @@ export class ConfirmGate {
 
   constructor(private readonly ttlMs = 60_000, private readonly now: () => number = Date.now) {}
 
-  /** Issue a token for this action; the user must answer after the transcript's current last line. */
+  /**
+   * Issue a token for this action; the user must answer after the transcript's current last line.
+   * `runId` is whatever the action targets: a run id, or a project name.
+   */
   issue(action: ConfirmAction, runId: string, transcript: Transcript): string {
     const token = `c_${randomBytes(4).toString('hex')}`;
     const lines = transcript.all();

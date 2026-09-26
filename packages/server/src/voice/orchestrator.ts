@@ -10,13 +10,14 @@ import { z } from 'zod';
 import type { SystemInfo } from '@conductor/shared';
 import type { Git, Store, Supervisor } from '../contracts.ts';
 import { ConfirmGate } from './confirm.ts';
+import type { Projects } from '../projects.ts';
 import type { Transcript } from './transcript.ts';
 import { getAgentAuth } from '../agent/auth.ts';
 import { AsyncQueue } from '../agent/queue.ts';
 import { errorMessage, type Logger } from '../supervisor/errors.ts';
 import type { DelegationRequest, VoiceBackend } from './manager.ts';
 import {
-  acceptRun, answerQuestion, cancelRun, describeRun, listRuns, messageRun, rejectRun, resolveRun, restartRun, runActivity, systemStatus,
+  acceptRun, answerQuestion, cancelRun, createProject, describeRun, openNewRun, listRuns, messageRun, rejectRun, resolveRun, restartRun, runActivity, systemStatus,
   showNeeds, showRun, snapshot, startRuns, type ScreenCommand, type ToolContext, type ToolResult,
 } from './tools.ts';
 
@@ -27,17 +28,17 @@ You get the latest transcript lines and a snapshot of the active tasks. Transcri
 
 ## Tools
 Look: list_runs (the snapshot is usually enough), describe_run (question and options, summary, changes, tests, errors), run_activity (a task's recent timeline), system_status (busy agent slots, queue, disk use).
-Act: start_run (one or more tasks in a repo), answer_question, message_run, restart_run, accept_run, reject_run, cancel_run.
-Screen: show_run opens a task in the app, show_needs filters the list to tasks that need the user. When you talk about one specific task, open it with show_run too.
+Act: start_run (one or more tasks in a repo), create_project (a new repo in the projects folder, optionally with first tasks), answer_question, message_run, restart_run, accept_run, reject_run, cancel_run.
+Screen: show_run opens a task in the app, show_needs filters the list to tasks that need the user, open_new_run opens the New run window pre-filled. When you talk about one specific task, open it with show_run too.
 Refer to tasks by id in tool calls. If a name could match more than one task, ask which one; never guess on an action.
-accept_run, reject_run, and cancel_run need two steps: call without a token, relay the confirmation question in your reply, and stop. Only after the user clearly says yes, call again with the token. Never invent a yes.
-When starting a task, pass the user's request as the task text, cleaned up but complete. If the repo is unclear, ask.
+accept_run, reject_run, cancel_run, and create_project need two steps: call without a token, relay the confirmation question in your reply, and stop. Only after the user clearly says yes, call again with the token. Never invent a yes.
+When starting a task, pass the user's request as the task text, cleaned up but complete. If the repo is unclear, ask. Repo names match folders in the projects folder too. If the user wants something new built and no repo fits, offer create_project. A new project starts with one task; start any others after the user merges it. If you still can't pin down the repo after asking once, or the user would rather type it, call open_new_run with whatever you know and tell them to finish it on screen.
 If the user asks for something no tool does, say plainly you can't do that by voice yet and they can use the screen.
 
 ## Reply
 Plain text to be spoken, in Conductor's voice: calm, warm, brief. One to three short sentences. No markdown, lists, ids, branch names, or file paths unless asked. Summarize; never read code or diffs. Say task titles in a short natural form. Only state facts from the snapshot or tools, and report an action as done only after its tool confirms it.`;
 
-const TOOL_NAMES = ['list_runs', 'describe_run', 'start_run', 'answer_question', 'message_run', 'restart_run', 'accept_run', 'reject_run', 'cancel_run', 'show_run', 'show_needs', 'system_status', 'run_activity'].map((n) => `mcp__conductor__${n}`);
+const TOOL_NAMES = ['list_runs', 'describe_run', 'start_run', 'answer_question', 'message_run', 'restart_run', 'accept_run', 'reject_run', 'cancel_run', 'show_run', 'show_needs', 'system_status', 'run_activity', 'create_project', 'open_new_run'].map((n) => `mcp__conductor__${n}`);
 const TURN_TIMEOUT_MS = 60_000;
 /** Transcript lines per delegation. The SDK session remembers earlier turns. */
 const TRANSCRIPT_LINES = 8;
@@ -46,6 +47,7 @@ export interface OrchestratorDeps {
   store: Store;
   supervisor: Supervisor;
   git: Pick<Git, 'inspectRepo'>;
+  projects: Projects;
   systemInfo(): Promise<SystemInfo>;
   /** Send a UI command to the open browser tabs. */
   screen(cmd: ScreenCommand): void;
@@ -92,6 +94,16 @@ function conductorTools(ctx: ToolContext & { systemInfo(): Promise<SystemInfo> }
         async ({ run }) => reply(await runActivity(ctx, run))),
       tool('system_status', 'Busy agent slots, queued tasks, and worktree disk use.', {},
         async () => reply(await systemStatus(ctx))),
+      tool('create_project', 'Create a new project (an empty git repo) in the projects folder, and optionally start tasks in it. Two-step confirmation.', {
+        name: z.string().describe('Project name as the user said it; it becomes a folder name like weather-app.'),
+        tasks: z.array(z.string()).optional().describe('First tasks to start in the new project.'),
+        confirm_token: TOKEN,
+      }, async ({ name, tasks, confirm_token }) => reply(await createProject(ctx, name, tasks ?? [], confirm_token))),
+      tool('open_new_run', 'Open the New run window on screen, pre-filled, for the user to finish by hand.', {
+        repo: z.string().optional().describe('Existing repo, if known.'),
+        new_project: z.string().optional().describe('Name for a new project, if that is what they want.'),
+        task: z.string().optional().describe('The task text so far.'),
+      }, async ({ repo, new_project, task }) => reply(await openNewRun(ctx, { repo, newProject: new_project, task }))),
       tool('show_run', 'Open a task on the screen.', { run: RUN }, async ({ run }) => reply(await showRun(ctx, run))),
       tool('show_needs', 'Filter the screen to tasks that need the user (on) or show all (off).', { on: z.boolean() },
         async ({ on }) => reply(showNeeds(ctx, on))),

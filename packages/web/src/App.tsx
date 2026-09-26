@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { needsAttention } from '@conductor/shared';
 import { Header } from './components/Header.tsx';
-import { NewRunDialog } from './components/NewRunDialog.tsx';
+import { NewRunDialog, type NewRunPrefill } from './components/NewRunDialog.tsx';
 import { RunDetail, type RunDetailHandle } from './components/RunDetail.tsx';
 import { RunList } from './components/RunList.tsx';
 import { ToastProvider } from './components/Toasts.tsx';
@@ -31,6 +31,8 @@ function Shell() {
   const [selectedId, select] = useHashSelection();
   const [filterNeeds, setFilterNeeds] = useState(false);
   const [newOpen, setNewOpen] = useState(false);
+  // Set when Conductor's voice opens the dialog; `key` remounts it with the new pre-fill.
+  const [prefill, setPrefill] = useState<{ key: number; fill: NewRunPrefill } | null>(null);
   const detail = useRef<RunDetailHandle>(null);
   const voiceLive = useVoice((s) => s.status === 'live');
 
@@ -48,6 +50,12 @@ function Shell() {
   // Conductor's voice drives the screen: open the task it's talking about, or filter the list.
   useEffect(() => store.onVoiceCommand((cmd) => {
     if (cmd.kind === 'show_needs') { setFilterNeeds(cmd.on); return; }
+    if (cmd.kind === 'new_run') {
+      const { kind: _, ...fill } = cmd;
+      setPrefill((p) => ({ key: (p?.key ?? 0) + 1, fill }));
+      setNewOpen(true);
+      return;
+    }
     const run = store.getState().runs[cmd.runId];
     if (run && !needsAttention(run, Date.now())) setFilterNeeds(false);
     select(cmd.runId);
@@ -142,9 +150,11 @@ function Shell() {
       <VoiceDock />
       {newOpen && (
         <NewRunDialog
+          key={prefill?.key ?? 0}
+          prefill={prefill?.fill}
           knownRepos={knownRepos}
-          onClose={() => setNewOpen(false)}
-          onCreated={(id) => { setNewOpen(false); setFilterNeeds(false); select(id); }}
+          onClose={() => { setNewOpen(false); setPrefill(null); }}
+          onCreated={(id) => { setNewOpen(false); setPrefill(null); setFilterNeeds(false); select(id); }}
         />
       )}
     </div>

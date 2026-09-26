@@ -1,5 +1,5 @@
 import type {
-  AcceptBody, CreateRunBody, RepoInfo, Run, RunDiff, RunEvent, StreamEvent, SystemInfo,
+  AcceptBody, CreatedProject, CreateRunBody, ProjectsInfo, RepoInfo, Run, RunDiff, RunEvent, StreamEvent, SystemInfo,
 } from '@conductor/shared';
 
 /** Error carrying the server's `{ error }` message verbatim. */
@@ -30,6 +30,10 @@ export interface DataSource {
   accept(id: string, mode: NonNullable<AcceptBody['mode']>): Promise<Run>;
   reject(id: string): Promise<Run>;
   inspectRepo(path: string): Promise<RepoInfo>;
+  /** Repos in the projects folder (CONDUCTOR_PROJECTS_DIR). */
+  projects(): Promise<ProjectsInfo>;
+  /** New git repo in the projects folder; an existing one of that name is returned as is. */
+  createProject(name: string): Promise<CreatedProject>;
   system(): Promise<SystemInfo>;
   /** Open the live stream. Returns a close function. */
   stream(h: StreamHandlers): () => void;
@@ -75,6 +79,8 @@ export const httpSource: DataSource = {
   accept: (id, mode) => req<{ run: Run }>('POST', runUrl(id, '/accept'), { mode } satisfies AcceptBody).then((r) => r.run),
   reject: (id) => req<{ run: Run }>('POST', runUrl(id, '/reject'), {}).then((r) => r.run),
   inspectRepo: (path) => req<RepoInfo>('GET', `/api/repos/inspect?path=${enc(path)}`),
+  projects: () => req<ProjectsInfo>('GET', '/api/projects'),
+  createProject: (name) => req<CreatedProject>('POST', '/api/projects', { name }),
   system: () => req<SystemInfo>('GET', '/api/system'),
   stream(h) {
     const es = new EventSource('/api/stream');

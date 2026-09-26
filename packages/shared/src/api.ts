@@ -17,6 +17,8 @@ import type { Run, RunDiff, RunEvent, DiskUsage } from './types.ts';
  *   GET    /api/repos/inspect?path=      -> RepoInfo                   (validates a path before create)
  *   GET    /api/system                   -> SystemInfo
  *   GET    /api/stream                   Server-Sent Events, see StreamEvent
+ *   GET    /api/projects                 -> ProjectsInfo              (repos in CONDUCTOR_PROJECTS_DIR)
+ *   POST   /api/projects                 { name } -> CreatedProject    (new git repo in that folder)
  *   POST   /api/voice/session            { sdp } -> { sessionId, sdp }   (GPT-Live WebRTC offer/answer)
  */
 export interface CreateRunBody {
@@ -40,6 +42,15 @@ export interface RepoInfo {
   error?: string;
 }
 
+export interface ProjectInfo { name: string; path: string }
+export interface ProjectsInfo {
+  /** CONDUCTOR_PROJECTS_DIR, or null when not set. */
+  dir: string | null;
+  projects: ProjectInfo[];
+}
+
+export interface CreatedProject extends ProjectInfo { existed: boolean }
+
 export interface SystemInfo {
   version: string;
   startedAt: number;
@@ -58,4 +69,8 @@ export type StreamEvent =
   | { type: 'voice'; command: VoiceScreenCommand }; // Conductor's voice driving the screen
 
 /** What the voice layer can do to the open UI. */
-export type VoiceScreenCommand = { kind: 'show_run'; runId: string } | { kind: 'show_needs'; on: boolean };
+export type VoiceScreenCommand =
+  | { kind: 'show_run'; runId: string }
+  | { kind: 'show_needs'; on: boolean }
+  /** Open the New run dialog, pre-filled with whatever the conversation settled. */
+  | { kind: 'new_run'; repoPath?: string; newProject?: string; task?: string };

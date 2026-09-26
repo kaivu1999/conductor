@@ -4,6 +4,7 @@ import type { SDKMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import { createOrchestrator } from '../src/voice/orchestrator.ts';
 import { describeRun, listRuns, resolveRun } from '../src/voice/tools.ts';
 import { Transcript } from '../src/voice/transcript.ts';
+import { createProjects } from '../src/projects.ts';
 import { createMemoryStore } from './helpers/index.ts';
 
 const NOW = 1_800_000_000_000;
@@ -21,7 +22,7 @@ function storeWith(...runs: Partial<Run>[]) {
 const quiet = { info() {}, warn() {}, error() {} };
 const deps = (store: ReturnType<typeof createMemoryStore>) => ({
   store, log: quiet, screen() {}, git: { inspectRepo: async () => { throw new Error('unused'); } },
-  supervisor: {} as never, systemInfo: async () => { throw new Error('unused'); },
+  supervisor: {} as never, projects: createProjects(null), systemInfo: async () => { throw new Error('unused'); },
 });
 
 describe('voice tools', () => {

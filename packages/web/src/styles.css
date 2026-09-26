@@ -450,6 +450,18 @@ kbd { font-family: var(--mono); font-size: 10px; padding: 0 4px; border: 1px sol
 .field-row .link { font-size: 12px; color: var(--fg-2); }
 .repo-info { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; min-height: 18px; margin-top: -4px; }
 
+/* project picker (New run) */
+.picker { position: relative; }
+.picker input { font-size: 14px; }
+.picker__list { position: absolute; top: 100%; left: 0; right: 0; z-index: 5; margin: 4px 0 0; padding: 4px; list-style: none; background: var(--bg-2); border: 1px solid var(--line-2); border-radius: 8px; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5); max-height: 280px; overflow: auto; }
+.picker__opt { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 6px 8px; border-radius: 5px; cursor: pointer; }
+.picker__opt--active { background: var(--bg-3); }
+.picker__name { display: inline-flex; align-items: center; gap: 6px; font-weight: 500; white-space: nowrap; }
+.picker__path { color: var(--fg-3); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; } /* rtl: truncate the start; <bdi> keeps the path itself ltr */
+.picker__tag { font-size: 10px; font-weight: 500; color: var(--fg-3); border: 1px solid var(--line-2); border-radius: 3px; padding: 0 4px; }
+.picker__opt--new { border-top: 1px solid var(--line); margin-top: 2px; }
+.picker__opt--new .picker__name { color: var(--accent); }
+.field--grow { flex: 1; }
 .task-input { min-height: 220px; resize: vertical; font-size: 14px; line-height: 1.5; }
 .modal__foot { display: flex; align-items: center; gap: 8px; padding-top: 4px; }
 

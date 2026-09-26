@@ -47,6 +47,7 @@ supervisor). `CONDUCTOR_LIVE=1 pnpm test` adds three tests that call the real ag
 | `CONDUCTOR_MAX_BUDGET_USD` | none | Per-run cost cap, checked between turns |
 | `CONDUCTOR_MODEL` | SDK default | Model for agent runs |
 | `CONDUCTOR_AGENT` | `claude` | `fake` for the scripted agent |
+| `CONDUCTOR_PROJECTS_DIR` | none | Folder where your repos live. Pick repos by name, and create new projects there |
 | `OPENAI_API_KEY` | none | Turns on voice. Read from the env or `.env` at the repo root |
 | `CONDUCTOR_VOICE` | `marin` | GPT-Live voice |
 | `CONDUCTOR_VOICE_MODEL` | `gpt-live-1` | Voice model |
@@ -54,8 +55,14 @@ supervisor). `CONDUCTOR_LIVE=1 pnpm test` adds three tests that call the real ag
 
 ## Using it
 
-- **New run** (`n`): pick a repo path (inspected live: branch, dirty state, detected
-  test command) and write the task. The base branch defaults to the current one.
+- **New run** (`n`): type a project name to pick a repo from your projects folder
+  (or recent ones, or type a path), and write the task. The repo is inspected live
+  (branch, dirty state, detected test command); base branch and test command are
+  under Options. Type a name that doesn't exist and pick **+ Create new project**:
+  conductor makes `<projects folder>/<name>` as a git repo on `main` and starts the
+  first task there. A new project gets one first task; once it's merged, run more in
+  parallel. The test command is detected again after a run, so tests the agent adds
+  get run.
 - **Status**: every run has a state and a one-line activity like
   `Editing src/slugify.js` or `Running npm test`, derived from the agent's tool
   calls. No raw logs; the Activity tab has a readable timeline if you want detail.
@@ -77,10 +84,13 @@ supervisor). `CONDUCTOR_LIVE=1 pnpm test` adds three tests that call the real ag
 
 Press **Talk** (`v`) and talk to Conductor. Anything the app does, you can say:
 "what needs me?", "start two tasks in tictactoe: add night mode, and a score
-board", "tell it Markdown", "what did the slugify one change?", "merge it", "show me
+board", "start a new project called weather app: a CLI for the forecast",
+"tell it Markdown", "what did the slugify one change?", "merge it", "show me
 only what needs me". Conductor opens the task it's talking about on screen.
 
-- Accept, reject and cancel ask first ("Merge Add night mode into main?") and only
+- If Conductor can't tell which repo you mean, it asks, or opens the New run window
+  pre-filled for you to finish.
+- Accept, reject, cancel, and creating a project ask first ("Merge Add night mode into main?") and only
   happen after a spoken yes.
 - When a task starts needing you, Conductor mentions it in one line, never over
   anyone's speech, and offers to go into detail. Several at once become "two tasks

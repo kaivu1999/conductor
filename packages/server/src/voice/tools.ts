@@ -10,6 +10,7 @@ import type { Git, Store, Supervisor } from '../contracts.ts';
 import { errorMessage } from '../supervisor/errors.ts';
 import type { ConfirmAction, ConfirmGate } from './confirm.ts';
 import type { Transcript } from './transcript.ts';
+import { slugify, type Projects } from '../projects.ts';
 
 /** How a state sounds in a sentence: "Add night mode is <phrase>". */
 const SPOKEN: Record<RunState, string> = {
@@ -129,6 +130,7 @@ export interface ToolContext {
   supervisor: Supervisor;
   git: Pick<Git, 'inspectRepo'>;
   confirm: ConfirmGate;
+  projects: Projects;
   /** The voice session's transcript, for confirmations. */
   transcript: Transcript;
   screen(cmd: ScreenCommand): void;
@@ -145,20 +147,22 @@ function withRun(ctx: ToolContext, ref: string, fn: (run: Run) => ToolResult | P
   return Promise.resolve().then(() => fn(r.run)).catch((err: unknown) => fail(errorMessage(err)));
 }
 
-/** Known repos: every repo a run has used, most recent first. */
-function knownRepos(store: Store): { path: string; name: string }[] {
+/** Known repos: every repo a run has used (most recent first), then the projects folder's. */
+async function knownRepos(ctx: Pick<ToolContext, 'store' | 'projects'>): Promise<{ path: string; name: string }[]> {
   const seen = new Map<string, string>();
-  for (const r of [...store.listRuns({ includeTerminal: true })].sort((a, b) => b.createdAt - a.createdAt)) {
+  for (const r of [...ctx.store.listRuns({ includeTerminal: true })].sort((a, b) => b.createdAt - a.createdAt)) {
     if (!seen.has(r.repoPath)) seen.set(r.repoPath, r.repoName);
   }
+  for (const p of await ctx.projects.list()) if (!seen.has(p.path)) seen.set(p.path, p.name);
   return [...seen].map(([path, name]) => ({ path, name }));
 }
 
 /** A spoken repo name ("tictactoe", "the sample app") or a path. */
 export async function resolveRepo(ctx: ToolContext, ref: string): Promise<{ path: string } | { error: string }> {
   const raw = ref.trim();
-  const repos = knownRepos(ctx.store);
-  const list = repos.length ? `Known repos: ${repos.map((r) => r.name).join(', ')}.` : 'No repos have been used yet; the user needs to give a full path.';
+  const repos = await knownRepos(ctx);
+  const list = repos.length ? `Known repos: ${repos.map((r) => r.name).join(', ')}.`
+    : ctx.projects.dir ? `There are no repos in ${ctx.projects.dir} yet; you can create a project.` : 'No repos are known yet; the user needs to give a full path.';
   if (/^(\/|~\/)/.test(raw)) {
     const info = await ctx.git.inspectRepo(raw.startsWith('~/') ? path.join(os.homedir(), raw.slice(2)) : raw);
     return info.isGitRepo ? { path: info.path } : { error: `${raw} is not a git repo${info.error ? ` (${info.error})` : ''}. ${list}` };
@@ -216,7 +220,41 @@ export function restartRun(ctx: ToolContext, ref: string): Promise<ToolResult> {
   });
 }
 
-const CONFIRM_TEXT: Record<ConfirmAction, (run: Run) => string> = {
+/** Create a new repo in the projects folder, then optionally start tasks in it. Two-step. */
+export async function createProject(ctx: ToolContext, name: string, tasks: string[] = [], token?: string): Promise<ToolResult> {
+  try {
+    if (!ctx.projects.dir) return fail('No projects folder is set, so I can\'t create projects. The user can set CONDUCTOR_PROJECTS_DIR in .env and restart.');
+    const slug = slugify(name);
+    if (!slug) return fail(`"${name}" doesn't make a usable folder name. Ask for another.`);
+    const target = path.join(ctx.projects.dir, slug);
+    const exists = (await ctx.projects.list()).some((p) => p.name === slug);
+    if (exists && !tasks.length) return ok(`A project called ${slug} already exists at ${target}. Start tasks in it with start_run.`);
+    if (!exists) {
+      if (!token) {
+        const t = ctx.confirm.issue('create_project', slug, ctx.transcript);
+        return ok(`Needs confirmation. Say the folder name back and ask: "Create a new project called ${slug.replace(/-/g, ' ')} in ${path.basename(ctx.projects.dir)}?" If they clearly say yes, call again with confirm_token "${t}" and the same name. Expires in 60 seconds.`);
+      }
+      const r = ctx.confirm.redeem(token, 'create_project', slug, ctx.transcript);
+      if (!r.ok) return fail(r.reason);
+      await ctx.projects.create(slug);
+    }
+    const made = exists ? `Project ${slug} already existed.` : `Created project ${slug} at ${target}.`;
+    const todo = tasks.map((t) => t.trim()).filter(Boolean);
+    if (!todo.length) return ok(`${made} It's an empty git repo; ask what to build.`);
+    // Parallel agents in an empty repo would all write the same scaffold and conflict on merge.
+    const now = exists ? todo : todo.slice(0, 1);
+    const later = exists ? [] : todo.slice(1);
+    const started = await startRuns(ctx, target, now);
+    const held = later.length
+      ? ` Holding ${later.length} more task${later.length === 1 ? '' : 's'} until the first is merged, so they build on it instead of conflicting: ${later.map((t) => `"${t.split('\n')[0]}"`).join(', ')}.`
+      : '';
+    return { text: `${made} ${started.text}${held}`, error: started.error };
+  } catch (err) {
+    return fail(errorMessage(err));
+  }
+}
+
+const CONFIRM_TEXT: Record<Exclude<ConfirmAction, 'create_project'>, (run: Run) => string> = {
   accept_merge: (r) => `Merge ${say(r)} into ${r.baseBranch}?`,
   accept_branch: (r) => `Accept ${say(r)} and keep its branch, without merging?`,
   reject: (r) => `Reject ${say(r)}? Its worktree and branch will be deleted.`,
@@ -224,7 +262,7 @@ const CONFIRM_TEXT: Record<ConfirmAction, (run: Run) => string> = {
 };
 
 /** Shared two-step flow for accept/reject/cancel. */
-function confirmed(ctx: ToolContext, ref: string, action: ConfirmAction, token: string | undefined, act: (run: Run) => Promise<Run>, done: (run: Run) => string): Promise<ToolResult> {
+function confirmed(ctx: ToolContext, ref: string, action: Exclude<ConfirmAction, 'create_project'>, token: string | undefined, act: (run: Run) => Promise<Run>, done: (run: Run) => string): Promise<ToolResult> {
   return withRun(ctx, ref, async (run) => {
     if (!token) {
       const t = ctx.confirm.issue(action, run.id, ctx.transcript);
@@ -256,6 +294,19 @@ export function showRun(ctx: ToolContext, ref: string): Promise<ToolResult> {
     ctx.screen({ kind: 'show_run', runId: run.id });
     return ok(`${say(run)} is open on screen.`);
   });
+}
+
+/** Hand over to the screen: open the New run dialog with what's known so far. */
+export async function openNewRun(ctx: ToolContext, args: { repo?: string; newProject?: string; task?: string }): Promise<ToolResult> {
+  let repoPath: string | undefined;
+  if (args.repo) {
+    const r = await resolveRepo(ctx, args.repo);
+    if ('path' in r) repoPath = r.path;
+  }
+  const newProject = !repoPath && args.newProject ? slugify(args.newProject) || undefined : undefined;
+  ctx.screen({ kind: 'new_run', ...(repoPath ? { repoPath } : {}), ...(newProject ? { newProject } : {}), ...(args.task?.trim() ? { task: args.task.trim() } : {}) });
+  const filled = [repoPath && `repo ${path.basename(repoPath)}`, newProject && `new project ${newProject}`, args.task && 'the task'].filter(Boolean);
+  return ok(`The New run window is open on screen${filled.length ? `, filled in with ${filled.join(' and ')}` : ''}. The user can finish it there.`);
 }
 
 export function showNeeds(ctx: ToolContext, on: boolean): ToolResult {
