@@ -9,6 +9,15 @@ the agent's summary, and the test results, then accept (merge or keep the branch
 or reject (worktree and branch are removed). Runs and results survive a conductor
 restart.
 
+You can also run the whole app by voice. Talk to Conductor, and it answers, starts and
+steers runs, merges after a spoken yes, and opens what it's talking about on screen.
+
+![Conductor answering by voice: the aurora bar glows magenta while it speaks, with a live subtitle](docs/screenshots/voice.png)
+
+| Review a finished run | Pop-out while you work elsewhere |
+| --- | --- |
+| ![Run list sorted by what needs you, with a run's summary, tests, overlap warning and diff](docs/screenshots/review.png) | ![The pop-out window: a glowing orb, the latest words, mute and end](docs/screenshots/popout.png) |
+
 ## Quick start
 
 Requires Node ≥ 22.5, pnpm (via `corepack enable`), git ≥ 2.38, and a working
