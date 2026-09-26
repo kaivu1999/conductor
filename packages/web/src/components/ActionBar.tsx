@@ -3,13 +3,18 @@ import type { Run } from '@conductor/shared';
 import { TRANSITIONS, canTransition, isLive } from '@conductor/shared';
 import { useAction } from '../useRunActions.ts';
 
+/** Finished runs you can send back to the agent with more instructions (Continue). */
+export const CONTINUE_STATES: readonly Run['state'][] = ['ready', 'conflict'];
+
 /** Buttons derived from TRANSITIONS so the UI never offers an illegal move. */
-export function ActionBar({ run, onAnswer }: { run: Run; onAnswer(): void }) {
+export function ActionBar({ run, onAnswer, onContinue }: { run: Run; onAnswer(): void; onContinue(): void }) {
   const { pending, run: act, src } = useAction();
   const next = TRANSITIONS[run.state];
   const canAccept = canTransition(run.state, 'accepting');
   const canReject = canTransition(run.state, 'rejected');
-  const canRestart = canTransition(run.state, 'queued');
+  // ready/conflict → queued is Continue (with instructions, below), not a plain restart.
+  const canRestart = canTransition(run.state, 'queued') && !CONTINUE_STATES.includes(run.state);
+  const canContinue = CONTINUE_STATES.includes(run.state);
   const canCancel = next.includes('cancelled');
   const busy = !!pending;
   const testsFailed = run.tests && !run.tests.passed;
@@ -34,6 +39,11 @@ export function ActionBar({ run, onAnswer }: { run: Run; onAnswer(): void }) {
             void act('accept', () => src.accept(run.id, mode));
           }}
         />
+      )}
+      {canContinue && (
+        <button className="btn" disabled={busy} onClick={onContinue} title="Send it back to the agent with more instructions">
+          Continue… <kbd>c</kbd>
+        </button>
       )}
       {canRestart && (
         <button className="btn btn--primary" disabled={busy} onClick={() => act('restart', () => src.restart(run.id))}>

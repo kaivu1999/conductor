@@ -1,5 +1,5 @@
 import type {
-  AcceptBody, CreatedProject, CreateRunBody, ProjectsInfo, RepoInfo, Run, RunDiff, RunEvent, StreamEvent, SystemInfo,
+  AcceptBody, ContinueBody, CreatedProject, CreateRunBody, ProjectsInfo, RepoInfo, Run, RunDiff, RunEvent, StreamEvent, SystemInfo,
 } from '@conductor/shared';
 
 /** Error carrying the server's `{ error }` message verbatim. */
@@ -27,6 +27,8 @@ export interface DataSource {
   message(id: string, text: string): Promise<Run>;
   cancel(id: string): Promise<Run>;
   restart(id: string): Promise<Run>;
+  /** Send a finished/stopped run back to its agent with follow-up instructions. */
+  continueRun(id: string, text: string): Promise<Run>;
   accept(id: string, mode: NonNullable<AcceptBody['mode']>): Promise<Run>;
   reject(id: string): Promise<Run>;
   inspectRepo(path: string): Promise<RepoInfo>;
@@ -76,6 +78,7 @@ export const httpSource: DataSource = {
   message: (id, text) => req<{ run: Run }>('POST', runUrl(id, '/message'), { text }).then((r) => r.run),
   cancel: (id) => req<{ run: Run }>('POST', runUrl(id, '/cancel'), {}).then((r) => r.run),
   restart: (id) => req<{ run: Run }>('POST', runUrl(id, '/restart'), {}).then((r) => r.run),
+  continueRun: (id, text) => req<{ run: Run }>('POST', runUrl(id, '/continue'), { text } satisfies ContinueBody).then((r) => r.run),
   accept: (id, mode) => req<{ run: Run }>('POST', runUrl(id, '/accept'), { mode } satisfies AcceptBody).then((r) => r.run),
   reject: (id) => req<{ run: Run }>('POST', runUrl(id, '/reject'), {}).then((r) => r.run),
   inspectRepo: (path) => req<RepoInfo>('GET', `/api/repos/inspect?path=${enc(path)}`),

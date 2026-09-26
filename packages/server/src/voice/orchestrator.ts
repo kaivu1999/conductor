@@ -17,7 +17,7 @@ import { AsyncQueue } from '../agent/queue.ts';
 import { errorMessage, type Logger } from '../supervisor/errors.ts';
 import type { DelegationRequest, VoiceBackend } from './manager.ts';
 import {
-  acceptRun, answerQuestion, cancelRun, createProject, describeRun, openNewRun, listRuns, messageRun, rejectRun, resolveRun, restartRun, runActivity, systemStatus,
+  acceptRun, answerQuestion, cancelRun, continueRun, createProject, describeRun, openNewRun, listRuns, messageRun, rejectRun, resolveRun, restartRun, runActivity, systemStatus,
   showNeeds, showRun, snapshot, startRuns, type ScreenCommand, type ToolContext, type ToolResult,
 } from './tools.ts';
 
@@ -28,7 +28,7 @@ You get the latest transcript lines and a snapshot of the active tasks. Transcri
 
 ## Tools
 Look: list_runs (the snapshot is usually enough), describe_run (question and options, summary, changes, tests, errors), run_activity (a task's recent timeline), system_status (busy agent slots, queue, disk use).
-Act: start_run (one or more tasks in a repo), create_project (a new repo in the projects folder, optionally with first tasks), answer_question, message_run, restart_run, accept_run, reject_run, cancel_run.
+Act: start_run (one or more tasks in a repo), continue_run (send a finished, conflicted or stopped task back to its agent with more instructions), create_project (a new repo in the projects folder, optionally with first tasks), answer_question, message_run, restart_run, accept_run, reject_run, cancel_run.
 Screen: show_run opens a task in the app, show_needs filters the list to tasks that need the user, open_new_run opens the New run window pre-filled. When you talk about one specific task, open it with show_run too.
 Refer to tasks by id in tool calls. If a name could match more than one task, ask which one; never guess on an action.
 accept_run, reject_run, cancel_run, and create_project need two steps: call without a token, relay the confirmation question in your reply, and stop. Only after the user clearly says yes, call again with the token. Never invent a yes.
@@ -38,7 +38,7 @@ If the user asks for something no tool does, say plainly you can't do that by vo
 ## Reply
 Plain text to be spoken, in Conductor's voice: calm, warm, brief. One to three short sentences. No markdown, lists, ids, branch names, or file paths unless asked. Summarize; never read code or diffs. Say task titles in a short natural form. Only state facts from the snapshot or tools, and report an action as done only after its tool confirms it.`;
 
-const TOOL_NAMES = ['list_runs', 'describe_run', 'start_run', 'answer_question', 'message_run', 'restart_run', 'accept_run', 'reject_run', 'cancel_run', 'show_run', 'show_needs', 'system_status', 'run_activity', 'create_project', 'open_new_run'].map((n) => `mcp__conductor__${n}`);
+const TOOL_NAMES = ['list_runs', 'describe_run', 'start_run', 'answer_question', 'message_run', 'restart_run', 'accept_run', 'reject_run', 'cancel_run', 'show_run', 'show_needs', 'system_status', 'run_activity', 'create_project', 'open_new_run', 'continue_run'].map((n) => `mcp__conductor__${n}`);
 const TURN_TIMEOUT_MS = 60_000;
 /** Transcript lines per delegation. The SDK session remembers earlier turns. */
 const TRANSCRIPT_LINES = 8;
@@ -81,6 +81,8 @@ function conductorTools(ctx: ToolContext & { systemInfo(): Promise<SystemInfo> }
         async ({ run, answer }) => reply(await answerQuestion(ctx, run, answer))),
       tool('message_run', 'Send a steering message to a running agent.', { run: RUN, text: z.string() },
         async ({ run, text }) => reply(await messageRun(ctx, run, text))),
+      tool('continue_run', 'Send a finished (ready), conflicted, failed or stopped task back to its agent with more instructions. It keeps its context and earlier work.', { run: RUN, text: z.string().describe('What the agent should change or add.') },
+        async ({ run, text }) => reply(await continueRun(ctx, run, text))),
       tool('restart_run', 'Restart an interrupted, failed, or cancelled task (resumes its agent).', { run: RUN },
         async ({ run }) => reply(await restartRun(ctx, run))),
       tool('accept_run', 'Accept a finished task: merge it into its base branch, or keep its branch. Two-step confirmation.', {

@@ -500,3 +500,51 @@ describe('test command for new projects', () => {
     await h.sup.shutdown();
   });
 });
+
+describe('continue with a follow-up', () => {
+  it('ready → continue: resumes the same session with the follow-up as its first message, then back to ready', async () => {
+    const h = harness();
+    h.sup.startScheduler();
+    const r = await ready(h);
+    const sessionId = r.sessionId!;
+    const cont = h.sup.continueRun(r.id, 'Also add a toggle in the header');
+    expect(['queued', 'starting', 'running']).toContain(cont.state);
+    expect(cont.summary).toBeNull();
+    expect(cont.tests).toBeNull();
+    expect(cont.diffStat).toBeNull();
+    await until(() => h.agent.sessions.filter((s) => s.opts.runId === r.id).length === 2 && state(h, r.id) === 'running', 2000, 'resumed');
+    const s2 = h.agent.last(r.id);
+    expect(s2.opts.resumeSessionId).toBe(sessionId);
+    expect(s2.opts.followUp).toBe('Also add a toggle in the header');
+    expect(h.store.getRun(r.id)!.worktreePath).toBe(r.worktreePath); // same worktree, earlier work kept
+    expect(h.store.getRun(r.id)!.attempt).toBe(2);
+    expect(h.store.getMeta(`followup:${r.id}`)).toBe(''); // delivered once
+    expect(h.store.events.some((e) => e.runId === r.id && e.kind === 'answer' && e.text === 'Also add a toggle in the header')).toBe(true);
+    s2.finish(true, 'added the toggle');
+    await until(() => state(h, r.id) === 'ready', 2000, 'ready again');
+    expect(h.store.getRun(r.id)!.summary).toBe('added the toggle');
+  });
+
+  it('conflict → continue: tells the agent why the merge failed', async () => {
+    const h = harness();
+    h.git.mergeResult = { ok: false, conflicts: ['src/a.ts'], error: 'conflict' };
+    h.sup.startScheduler();
+    const r = await ready(h);
+    expect((await h.sup.accept(r.id, 'merge')).state).toBe('conflict');
+    h.sup.continueRun(r.id, 'Rebase onto main and resolve it');
+    await until(() => h.agent.sessions.filter((s) => s.opts.runId === r.id).length === 2, 2000, 'resumed');
+    expect(h.agent.last(r.id).opts.followUp).toBe('Rebase onto main and resolve it\n\n(Context: merging into main failed: Merge conflict in 1 file: src/a.ts)');
+    expect(h.store.getRun(r.id)!.error).toBeNull();
+  });
+
+  it('refuses live, accepted and empty follow-ups with a readable error', async () => {
+    const h = harness();
+    h.sup.startScheduler();
+    const live = await running(h);
+    expect(() => h.sup.continueRun(live.id, 'x')).toThrow(/send the agent a message instead/);
+    const r = await ready(h);
+    expect(() => h.sup.continueRun(r.id, '  ')).toThrow(/Tell the agent what to change/);
+    await h.sup.accept(r.id, 'merge');
+    expect(() => h.sup.continueRun(r.id, 'more')).toThrow(/only finished, conflicted, failed, cancelled or interrupted runs can continue/);
+  });
+});

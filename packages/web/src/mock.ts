@@ -384,6 +384,13 @@ export function createMockSource(): DataSource {
       setTimeout(() => update(id, { state: 'running', activity: 'Read src/billing/Invoice.tsx', activityAt: Date.now() }), 2600);
       return update(id, { state: 'queued', error: null, attempt: r.attempt + 1, activity: 'Queued for restart' });
     }),
+    continueRun: (id, text) => call(() => {
+      const r = guard(id, ['ready', 'conflict', 'interrupted', 'failed', 'cancelled'], 'continue');
+      pushEvent(id, 'answer', text);
+      setTimeout(() => update(id, { state: 'starting', activity: 'Resuming session', activityAt: Date.now() }), 1200);
+      setTimeout(() => update(id, { state: 'running', activity: 'Working on: ' + text, activityAt: Date.now() }), 2600);
+      return update(id, { state: 'queued', error: null, summary: null, tests: null, diffStat: null, finishedAt: null, attempt: r.attempt + 1, activity: 'Queued to continue' });
+    }),
     accept: (id, mode) => call(() => {
       guard(id, ['ready', 'conflict'], 'accept');
       const r = update(id, { state: 'accepting', activity: mode === 'merge' ? 'Merging into main' : 'Keeping branch' });

@@ -12,6 +12,7 @@ import type { Run, RunDiff, RunEvent, DiskUsage } from './types.ts';
  *   POST   /api/runs/:id/message         MessageBody -> { run: Run }   (steer a live run with a follow-up)
  *   POST   /api/runs/:id/cancel          -> { run: Run }
  *   POST   /api/runs/:id/restart         -> { run: Run }               (interrupted|failed|cancelled -> queued; resumes session)
+ *   POST   /api/runs/:id/continue        ContinueBody -> { run: Run }  (ready|conflict|failed|cancelled|interrupted -> queued; resumes with the follow-up)
  *   POST   /api/runs/:id/accept          AcceptBody -> { run: Run }    (ready|conflict)
  *   POST   /api/runs/:id/reject          -> { run: Run }
  *   GET    /api/repos/inspect?path=      -> RepoInfo                   (validates a path before create)
@@ -29,6 +30,8 @@ export interface CreateRunBody {
 }
 export interface AnswerBody { questionId: string; answer: string }
 export interface MessageBody { text: string }
+/** Follow-up instructions for a finished or stopped run (Continue). */
+export interface ContinueBody { text: string }
 export interface AcceptBody { mode?: 'merge' | 'branch' } // 'branch' = keep branch, don't merge
 
 export interface RepoInfo {

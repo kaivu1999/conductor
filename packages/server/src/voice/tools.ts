@@ -206,11 +206,32 @@ export function answerQuestion(ctx: ToolContext, ref: string, answer: string): P
   });
 }
 
+/** States where a follow-up restarts the agent (Continue) instead of reaching a live one. */
+const CONTINUABLE: readonly RunState[] = ['ready', 'conflict', 'failed', 'cancelled', 'interrupted'];
+
 export function messageRun(ctx: ToolContext, ref: string, text: string): Promise<ToolResult> {
   return withRun(ctx, ref, (run) => {
+    // "Tell it to also add a toggle" means the same thing whether the agent is running or done.
+    if (CONTINUABLE.includes(run.state)) return continueWith(ctx, run, text);
     ctx.supervisor.message(run.id, text.trim());
     return ok(`Sent to ${say(run)}.`);
   });
+}
+
+/** Send a finished or stopped task back to its agent with more instructions. */
+export function continueRun(ctx: ToolContext, ref: string, text: string): Promise<ToolResult> {
+  return withRun(ctx, ref, (run) => continueWith(ctx, run, text));
+}
+
+function continueWith(ctx: ToolContext, run: Run, text: string): ToolResult {
+  if (!text.trim()) return fail('Ask what the agent should change.');
+  if (!CONTINUABLE.includes(run.state)) {
+    return fail(`${say(run)} is ${SPOKEN[run.state]}; ${run.state === 'accepted' || run.state === 'rejected' ? 'start a new task instead' : 'use message_run to reach the running agent'}.`);
+  }
+  const was = run.state;
+  const r = ctx.supervisor.continueRun(run.id, text.trim());
+  ctx.screen({ kind: 'show_run', runId: r.id });
+  return ok(`Sent ${say(r)} back to its agent with: "${text.trim()}". It ${was === 'ready' ? 'was ready for review; ' : ''}keeps its earlier work and is ${SPOKEN[r.state]}.`);
 }
 
 export function restartRun(ctx: ToolContext, ref: string): Promise<ToolResult> {

@@ -88,6 +88,8 @@ export interface AgentStartOptions {
   cwd: string; // the worktree
   task: string;
   resumeSessionId?: string; // set on restart
+  /** The user's follow-up instructions after reviewing (Continue). Sent as the first message. */
+  followUp?: string;
   maxBudgetUsd?: number;
   onEvent: (e: AgentEvent) => void;
 }
@@ -117,6 +119,8 @@ export interface Supervisor {
   message(runId: string, text: string): Run;
   cancel(runId: string): Promise<Run>;
   restart(runId: string): Run;
+  /** Send a finished (or stopped) run back to its agent with follow-up instructions. */
+  continueRun(runId: string, text: string): Run;
   accept(runId: string, mode: 'merge' | 'branch'): Promise<Run>;
   reject(runId: string): Promise<Run>;
   shutdown(): Promise<void>; // stop all agents, mark their runs interrupted

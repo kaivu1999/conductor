@@ -79,6 +79,10 @@ interface Live {
 }
 
 const RESTARTABLE: readonly RunState[] = ['interrupted', 'failed', 'cancelled'];
+/** Continue = restart with the user's follow-up; also from review (ready) and a failed merge (conflict). */
+const CONTINUABLE: readonly RunState[] = ['ready', 'conflict', ...RESTARTABLE];
+/** Store meta key holding a run's pending follow-up until its agent starts (survives a restart). */
+const followUpKey = (runId: string) => `followup:${runId}`;
 const REJECTABLE: readonly RunState[] = ['ready', 'conflict', 'failed', 'cancelled', 'interrupted'];
 const AGENT_STATES: readonly RunState[] = ['starting', 'running', 'waiting_input'];
 
@@ -195,15 +199,18 @@ export function createSupervisor(deps: SupervisorDeps): ConductorSupervisor {
       };
       sessions.set(id, live);
       const l = live;
+      const followUp = store.getMeta(followUpKey(id)) || undefined;
       const session = agent.start({
         runId: id,
         cwd: worktreePath,
         task: run.task,
         ...(run.sessionId ? { resumeSessionId: run.sessionId } : {}),
+        ...(followUp ? { followUp } : {}),
         ...(config.maxBudgetUsd !== undefined ? { maxBudgetUsd: config.maxBudgetUsd } : {}),
         onEvent: (e) => onAgentEvent(l, e),
       });
       live.session = session;
+      if (followUp) store.setMeta(followUpKey(id), ''); // delivered as the session's first message
       l.settled = session.finished
         .catch((err) => {
           l.error ??= `agent crashed: ${errorMessage(err)}`;
@@ -565,6 +572,36 @@ export function createSupervisor(deps: SupervisorDeps): ConductorSupervisor {
       }) ?? raced(runId, 'restart');
       tick();
       return r;
+    },
+
+    continueRun(runId, text) {
+      const body = text?.trim();
+      if (!body) throw badRequest('Tell the agent what to change.');
+      const run = mustGet(runId);
+      if (!CONTINUABLE.includes(run.state)) {
+        throw conflict(isLive(run.state) || run.state === 'queued'
+          ? `This run is ${run.state}; send the agent a message instead.`
+          : `This run is ${run.state}; only finished, conflicted, failed, cancelled or interrupted runs can continue.`);
+      }
+      if (ctx.busy(runId)) throw conflict('This run is busy; try again in a few seconds.');
+      // After a failed merge the agent needs to know why it's back.
+      const followUp = run.state === 'conflict' && run.error
+        ? `${body}\n\n(Context: merging into ${run.baseBranch} failed: ${run.error})`
+        : body;
+      store.setMeta(followUpKey(runId), followUp);
+      // Keep sessionId and the worktree: the agent resumes with its context and its committed work.
+      const r = w.transition(runId, CONTINUABLE, 'queued', {
+        error: null, pendingQuestion: null, pid: null, pidStartedAt: null, finishedAt: null,
+        summary: null, tests: null, diffStat: null,
+        activity: 'Queued to continue', activityAt: Date.now(),
+      });
+      if (!r) {
+        store.setMeta(followUpKey(runId), '');
+        raced(runId, 'continue');
+      }
+      w.event(runId, 'answer', body, { kind: 'continue' });
+      tick();
+      return r!;
     },
 
     async accept(runId, mode) {

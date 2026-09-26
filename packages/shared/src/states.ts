@@ -34,9 +34,9 @@ export const TRANSITIONS: Record<RunState, readonly RunState[]> = {
   running: ['waiting_input', 'testing', 'failed', 'cancelled', 'interrupted'],
   waiting_input: ['running', 'failed', 'cancelled', 'interrupted'],
   testing: ['ready', 'failed', 'cancelled', 'interrupted'],
-  ready: ['accepting', 'rejected'],
+  ready: ['accepting', 'rejected', 'queued'], // queued = continue with a follow-up
   accepting: ['accepted', 'conflict', 'ready', 'interrupted'],
-  conflict: ['accepting', 'rejected'],
+  conflict: ['accepting', 'rejected', 'queued'],
   accepted: [],
   rejected: [],
   failed: ['queued', 'rejected'],

@@ -43,6 +43,7 @@ const CreateRunBody = z.object({
 });
 const AnswerBody = z.object({ questionId: z.string().min(1), answer: z.string().trim().min(1, 'answer is empty') });
 const MessageBody = z.object({ text: z.string().trim().min(1, 'message is empty') });
+const ContinueBody = z.object({ text: z.string().trim().min(1, 'tell the agent what to change').max(100_000) });
 const AcceptBody = z.object({ mode: z.enum(['merge', 'branch']).default('merge') }).default({});
 const IdParams = z.object({ id: z.string().min(1) });
 const EventsQuery = z.object({ after: z.coerce.number().int().min(0).default(0), limit: z.coerce.number().int().min(1).max(5000).default(1000) });
@@ -142,6 +143,12 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
 
     api.post('/runs/:id/cancel', async (req) => ({ run: await supervisor.cancel(IdParams.parse(req.params).id) }));
     api.post('/runs/:id/restart', async (req) => ({ run: supervisor.restart(IdParams.parse(req.params).id) }));
+
+    api.post('/runs/:id/continue', async (req) => {
+      const { id } = IdParams.parse(req.params);
+      const { text } = ContinueBody.parse(req.body ?? {});
+      return { run: supervisor.continueRun(id, text) };
+    });
 
     api.post('/runs/:id/accept', async (req) => {
       const { id } = IdParams.parse(req.params);

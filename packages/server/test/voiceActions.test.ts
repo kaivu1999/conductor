@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { Run, VoiceScreenCommand } from '@conductor/shared';
 import { ConfirmGate, saidYes } from '../src/voice/confirm.ts';
 import {
-  acceptRun, answerQuestion, cancelRun, createProject, messageRun, openNewRun, rejectRun, resolveRepo, showNeeds, showRun, startRuns, type ToolContext,
+  acceptRun, answerQuestion, cancelRun, continueRun, createProject, messageRun, openNewRun, rejectRun, resolveRepo, showNeeds, showRun, startRuns, type ToolContext,
 } from '../src/voice/tools.ts';
 import { Transcript } from '../src/voice/transcript.ts';
 import { createProjects } from '../src/projects.ts';
@@ -158,6 +158,27 @@ describe('voice actions', () => {
     talk(s.ctx.transcript, 'user', 'yes cancel it');
     expect((await cancelRun(s.ctx, live.id, c)).text).toBe('Cancelled "Add a score board".');
     expect(s.state(live.id)).toBe('cancelled');
+  });
+
+  it('continues a ready task, and routes "tell it to also…" on a finished task to continue', async () => {
+    const s = setup();
+    const run = await ready(s, 'Add night mode');
+    s.screen.length = 0;
+    const res = await continueRun(s.ctx, 'night mode', 'Also add a toggle in the header');
+    expect(res.text).toMatch(/^Sent "Add night mode" back to its agent with: "Also add a toggle in the header"\. It was ready for review; keeps its earlier work/);
+    expect(s.screen).toEqual([{ kind: 'show_run', runId: run.id }]);
+    await until(() => s.state(run.id) === 'running', 2000, 'running again');
+    expect(s.h.agent.last(run.id).opts.followUp).toBe('Also add a toggle in the header');
+    s.h.agent.last(run.id).finish(true);
+    await until(() => s.state(run.id) === 'ready', 2000, 'ready again');
+    await messageRun(s.ctx, run.id, 'And a keyboard shortcut');
+    await until(() => s.h.agent.last(run.id).opts.followUp === 'And a keyboard shortcut', 2000, 'routed to continue');
+  });
+
+  it('refuses to continue a task that is still running or already merged', async () => {
+    const s = setup();
+    const live = await started(s, 'Add a score board');
+    expect((await continueRun(s.ctx, live.id, 'x')).text).toMatch(/is running; use message_run/);
   });
 
   it('drives the screen', async () => {

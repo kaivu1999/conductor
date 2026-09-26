@@ -90,6 +90,9 @@ function Shell() {
         // Jump to the most urgent question if the current run isn't asking one.
         const target = selected?.state === 'waiting_input' ? selected : sorted.find((r) => r.state === 'waiting_input');
         if (target) { e.preventDefault(); select(target.id); requestAnimationFrame(() => detail.current?.focusAnswer()); }
+      } else if (e.key === 'c' && selected && (selected.state === 'ready' || selected.state === 'conflict')) {
+        e.preventDefault();
+        detail.current?.focusContinue();
       } else if (e.key === 'Escape') select(null);
     };
     window.addEventListener('keydown', onKey);

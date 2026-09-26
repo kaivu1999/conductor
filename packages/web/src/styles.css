@@ -344,6 +344,14 @@ kbd { font-family: var(--mono); font-size: 10px; padding: 0 4px; border: 1px sol
 .answer__free { display: flex; gap: 8px; align-items: flex-end; }
 .answer__free textarea { flex: 1; resize: vertical; min-height: 38px; background: var(--bg); }
 .answer__free .btn { height: 38px; }
+/* Continue: send a finished run back with more instructions. Neutral, secondary to Accept. */
+.continue { margin: 14px 20px 0; padding: 12px 14px; border-radius: 8px; background: var(--bg-1); border: 1px solid var(--line-2); }
+.continue:focus-within { border-color: var(--accent); }
+.continue__head { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; font-size: 12px; margin-bottom: 8px; }
+.continue__title { font-weight: 600; color: var(--fg); }
+.continue__free { display: flex; gap: 8px; align-items: flex-end; }
+.continue__free textarea { flex: 1; resize: vertical; min-height: 38px; background: var(--bg); }
+.continue__free .btn { height: 38px; }
 
 .tabs { display: flex; gap: 2px; padding: 0 20px; border-bottom: 1px solid var(--line); margin-top: 14px; }
 .tab { background: none; border: 0; border-bottom: 2px solid transparent; padding: 8px 10px; color: var(--fg-3); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; margin-bottom: -1px; }

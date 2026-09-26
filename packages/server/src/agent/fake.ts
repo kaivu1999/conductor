@@ -146,6 +146,14 @@ class FakeSession implements AgentSession {
     let ok = false;
     try {
       this.emit({ type: 'session', sessionId: this.opts.resumeSessionId ?? `fake-${randomUUID()}` });
+      if (this.opts.followUp) {
+        // Make the follow-up visible in the diff, like a real agent's extra changes would be.
+        this.emit({ type: 'text', text: normalizeText(`Working on your follow-up: ${this.opts.followUp}`) });
+        const notes = path.resolve(cwd, 'FOLLOW_UPS.md');
+        const prev = await fs.readFile(notes, 'utf8').catch(() => '# Follow-ups\n');
+        await fs.writeFile(notes, `${prev}\n- ${this.opts.followUp.split('\n')[0]}\n`);
+        this.emit({ type: 'tool', name: 'Write', summary: 'Write FOLLOW_UPS.md' });
+      }
       for (const step of this.script) {
         if (step.delayMs) await this.sleep(step.delayMs);
         if (this.stopped) throw new StoppedError();
@@ -167,6 +175,7 @@ class FakeSession implements AgentSession {
           await fs.mkdir(path.dirname(abs), { recursive: true });
           await fs.writeFile(abs, step.writeFile.content);
         } else if ('ask' in step) {
+          if (this.opts.resumeSessionId) continue; // already asked and answered in this session
           const a = typeof step.ask === 'string' ? { question: step.ask } : step.ask;
           const q: PendingQuestion = {
             id: 'q_' + randomBytes(6).toString('hex'),

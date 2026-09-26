@@ -124,9 +124,13 @@ class ClaudeSession implements AgentSession {
     } catch {
       /* ignore */
     }
-    const first = opts.resumeSessionId
-      ? `The conductor restarted; continue the task from where you left off. Original task:\n\n${opts.task}`
-      : opts.task;
+    const first = opts.followUp
+      ? opts.resumeSessionId
+        ? `The user reviewed your work so far (it is committed on this branch) and wants more changes:\n\n${opts.followUp}`
+        : `${opts.task}\n\nAn earlier attempt at this task is committed on this branch. The user reviewed it and wants more changes:\n\n${opts.followUp}`
+      : opts.resumeSessionId
+        ? `The conductor restarted; continue the task from where you left off. Original task:\n\n${opts.task}`
+        : opts.task;
     this.enqueue(first);
     void this.run();
   }

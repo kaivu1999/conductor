@@ -3,8 +3,9 @@ import type { Run } from '@conductor/shared';
 import { isLive } from '@conductor/shared';
 import { clock, cost, duration, plural } from '../format.ts';
 import { attentionReason, staleMinutes } from '../stateMeta.ts';
-import { ActionBar } from './ActionBar.tsx';
+import { ActionBar, CONTINUE_STATES } from './ActionBar.tsx';
 import { AnswerBox, type AnswerBoxHandle } from './AnswerBox.tsx';
+import { ContinueBox, type ContinueBoxHandle } from './ContinueBox.tsx';
 import { DiffStatBadge, TestBadge } from './Badges.tsx';
 import { ReviewPanel } from './ReviewPanel.tsx';
 import { StateChip } from './StateChip.tsx';
@@ -14,14 +15,15 @@ type Tab = 'review' | 'activity';
 
 const defaultTab = (r: Run): Tab => (['ready', 'conflict', 'accepted', 'accepting'].includes(r.state) ? 'review' : 'activity');
 
-export interface RunDetailHandle { focusAnswer(): void }
+export interface RunDetailHandle { focusAnswer(): void; focusContinue(): void }
 
 export const RunDetail = forwardRef<RunDetailHandle, { run: Run; now: number; onSelect(id: string): void }>(
   function RunDetail({ run, now, onSelect }, ref) {
     const [tab, setTab] = useState<Tab>(defaultTab(run));
     const [taskOpen, setTaskOpen] = useState(false);
     const answer = useRef<AnswerBoxHandle>(null);
-    useImperativeHandle(ref, () => ({ focusAnswer: () => answer.current?.focus() }), []);
+    const follow = useRef<ContinueBoxHandle>(null);
+    useImperativeHandle(ref, () => ({ focusAnswer: () => answer.current?.focus(), focusContinue: () => follow.current?.focus() }), []);
 
     // New run selected → reset tab. Same run moving into review → switch to review.
     const lastId = useRef(run.id);
@@ -68,7 +70,7 @@ export const RunDetail = forwardRef<RunDetailHandle, { run: Run; now: number; on
               </dd></div>
             )}
           </dl>
-          <ActionBar run={run} onAnswer={() => answer.current?.focus()} />
+          <ActionBar run={run} onAnswer={() => answer.current?.focus()} onContinue={() => follow.current?.focus()} />
         </header>
 
         {run.error && <ErrorBanner run={run} />}
@@ -82,6 +84,7 @@ export const RunDetail = forwardRef<RunDetailHandle, { run: Run; now: number; on
         {run.state === 'waiting_input' && run.pendingQuestion && (
           <AnswerBox key={run.pendingQuestion.id} ref={answer} run={run} now={now} />
         )}
+        {CONTINUE_STATES.includes(run.state) && <ContinueBox key={run.id} ref={follow} run={run} />}
 
         <div className="tabs" role="tablist">
           <button role="tab" aria-selected={tab === 'review'} className={`tab${tab === 'review' ? ' tab--on' : ''}`} onClick={() => setTab('review')}>
