@@ -33,6 +33,7 @@ export const DEFAULT_FAKE_SCRIPT: FakeScript = [
   { activity: 'Reading the codebase', delayMs: 300 },
   { tool: { name: 'Glob', input: { pattern: '**/*' } }, delayMs: 300 },
   { text: 'I will add a note file describing the task.', delayMs: 300 },
+  { ask: { question: 'Should the note be Markdown or plain text?', options: ['Markdown', 'Plain text'] }, delayMs: 300 },
   { writeFile: { path: 'CONDUCTOR_FAKE.md', content: '# Fake agent run\n\nThis file was written by the fake adapter.\n' }, delayMs: 300 },
   { usage: { costUsd: 0.01, turns: 2 } },
   { done: 'Added CONDUCTOR_FAKE.md (fake adapter). Verified by reading it back.', delayMs: 200 },
