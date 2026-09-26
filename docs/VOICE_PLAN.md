@@ -1,7 +1,7 @@
 # Voice layer plan
 
-Status: step 1 of the build order is done (session minting, browser WebRTC,
-captions); steps 2–6 are next. This file is the hand-off for the implementation
+Status: steps 1–2 of the build order are done (session minting, browser WebRTC,
+captions, sideband with an echo delegate); steps 3–6 are next. This file is the hand-off for the implementation
 session: it covers the architecture, the decisions behind it, the GPT-Live API
 facts we depend on, and the build order.
 
@@ -168,6 +168,9 @@ Do not guess the result while waiting.
 
 ## Risks and open questions
 
-- Node 22's global `WebSocket` may not accept an `Authorization` header. The fallback is the `ws` package.
+- ~~Node 22's global `WebSocket` may not accept an `Authorization` header.~~ Resolved: undici's
+  `new WebSocket(url, { headers })` sends it (checked on Node 22.22), so no `ws` dependency.
+- The user's last words can arrive after `session.delegation.created`. The manager waits 400ms
+  before reading the transcript; in a live test that captured the whole question.
 - Orchestrator latency: Claude with a cold SDK spawn per delegation is slow. Keep one warm streaming session per voice session. GPT-Live keeps talking ("let me check") in the meantime.
 - The transcript can mishear run titles. The orchestrator asks when it's unsure and never guesses on a destructive action.

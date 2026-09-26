@@ -14,7 +14,8 @@ import type { ConductorSupervisor } from '../supervisor/supervisor.ts';
 import { notFound, conflict } from '../supervisor/errors.ts';
 import { toHttpError } from './errors.ts';
 import { createSseHub } from './sse.ts';
-import { createLiveSession, loadVoiceConfig, type VoiceConfig } from '../voice/live.ts';
+import { loadVoiceConfig } from '../voice/live.ts';
+import { createVoiceManager, type VoiceManager } from '../voice/manager.ts';
 
 export interface ServerDeps {
   supervisor: ConductorSupervisor;
@@ -25,10 +26,8 @@ export interface ServerDeps {
   webDist?: string;
   logger?: boolean;
   systemEveryMs?: number;
-  /** GPT-Live settings (default: from process.env). */
-  voice?: VoiceConfig;
-  /** Injected for tests. */
-  fetch?: typeof fetch;
+  /** Voice sessions (default: GPT-Live configured from process.env). */
+  voice?: VoiceManager;
 }
 
 const CreateRunBody = z.object({
@@ -49,7 +48,7 @@ const DEFAULT_WEB_DIST = path.resolve(path.dirname(fileURLToPath(import.meta.url
 
 export function buildServer(deps: ServerDeps): FastifyInstance {
   const { supervisor, store, git } = deps;
-  const voice = deps.voice ?? loadVoiceConfig();
+  const voice = deps.voice ?? createVoiceManager({ config: loadVoiceConfig() });
   const app = Fastify({ logger: deps.logger ?? false, bodyLimit: 1024 * 1024 });
 
   const getRun = (id: string): Run => {
@@ -78,6 +77,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   app.addHook('preClose', async () => {
     clearInterval(systemTimer);
     hub.close();
+    await voice.closeAll();
   });
 
   // ─── routes ────────────────────────────────────────────────────────────────
@@ -139,7 +139,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
 
     api.post('/voice/session', async (req) => {
       const { sdp } = VoiceSessionBody.parse(req.body ?? {});
-      return createLiveSession(voice, sdp, deps.fetch);
+      return voice.open(sdp);
     });
 
     api.get('/stream', (req, reply: FastifyReply) => hub.handle(req, reply));
