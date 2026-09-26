@@ -47,6 +47,10 @@ supervisor). `CONDUCTOR_LIVE=1 pnpm test` adds three tests that call the real ag
 | `CONDUCTOR_MAX_BUDGET_USD` | none | Per-run cost cap, checked between turns |
 | `CONDUCTOR_MODEL` | SDK default | Model for agent runs |
 | `CONDUCTOR_AGENT` | `claude` | `fake` for the scripted agent |
+| `OPENAI_API_KEY` | none | Turns on voice. Read from the env or `.env` at the repo root |
+| `CONDUCTOR_VOICE` | `marin` | GPT-Live voice |
+| `CONDUCTOR_VOICE_MODEL` | `gpt-live-1` | Voice model |
+| `CONDUCTOR_VOICE_AGENT_MODEL` | SDK default | Model for the voice orchestrator |
 
 ## Using it
 
@@ -69,6 +73,23 @@ supervisor). `CONDUCTOR_LIVE=1 pnpm test` adds three tests that call the real ag
 - **Restart**: kill conductor any way you like and start it again. Runs that were
   live come back as *interrupted*; **Restart** resumes the same agent session.
 
+### Voice
+
+Press **Talk** (`v`) and talk to Conductor. Anything the app does, you can say:
+"what needs me?", "start two tasks in tictactoe: add night mode, and a score
+board", "tell it Markdown", "what did the slugify one change?", "merge it", "show me
+only what needs me". Conductor opens the task it's talking about on screen.
+
+- Accept, reject and cancel ask first ("Merge Add night mode into main?") and only
+  happen after a spoken yes.
+- When a task starts needing you, Conductor mentions it in one line, never over
+  anyone's speech, and offers to go into detail. Several at once become "two tasks
+  need you".
+- `m` mutes the mic. The dock shows who's talking, captions, and when Conductor is
+  thinking.
+
+Voice needs `OPENAI_API_KEY`; everything else works without it.
+
 ## Architecture
 
 ```
@@ -80,6 +101,7 @@ packages/
     agent/        Claude Agent SDK adapter, fake agent, activity line, process tagging
     supervisor/   scheduler, run lifecycle, recovery, reaper, overlap detection
     api/          REST + SSE
+    voice/        GPT-Live session + sideband, orchestrator, confirmations, notices
   web/      React + Vite, one SSE stream, no client router
 scripts/make-demo-repo.sh
 ```
@@ -128,9 +150,22 @@ it yourself) or reject.
 failed removals and deletes directories under the worktree root that no run owns.
 It only touches directories named like a run id.
 
-**Live updates.** `/api/stream` is SSE with named `run`, `event`, and `system`
-events. The client reconnects with backoff and catches up with `?after=<seq>`, so
+**Live updates.** `/api/stream` is SSE with named `run`, `event`, `system`, and
+`voice` events. The client reconnects with backoff and catches up with `?after=<seq>`, so
 a conductor restart shows as "reconnecting…" and then recovers without a reload.
+
+**Voice.** The browser carries audio only: it sends its WebRTC offer to
+`POST /api/voice/session`, and the server creates a `gpt-live-1` session with client
+delegation (the OpenAI key never reaches the page). The server then attaches a
+sideband WebSocket to the same session and owns everything else: the transcript,
+delegations, and notices. Each delegation goes to an orchestrator, one warm
+Agent SDK session per voice session, with no built-in tools and only conductor
+tools that call the supervisor directly. It gets the latest transcript lines plus a
+snapshot of the tasks, and its short reply goes back with `session.commentary.append`
+for GPT-Live to speak. Destructive tools hand out a confirmation token, and the
+action runs only if the token comes back within 60s after the user said yes out
+loud; code checks this, not the prompt. Screen actions (`show_run`, `show_needs`)
+reach the UI as `voice` SSE events. Design and API notes: [docs/VOICE_PLAN.md](docs/VOICE_PLAN.md).
 
 ## Trade-offs
 

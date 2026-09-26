@@ -18,18 +18,29 @@ Part 1 end to end, plus the "blocked on a question" extension:
 - The agent can ask a question and wait for an answer inline. You can also send a
   running agent a steering message.
 - Overlap warnings when two live runs touch the same files.
+- **Voice.** You can talk to Conductor and do everything the app does: ask what
+  needs you, start one or several tasks, answer an agent, steer it, merge, keep a
+  branch, reject, cancel, restart, and drive the screen. Conductor is its own persona
+  (built by Kaivu). It's full-duplex GPT-Live over WebRTC. A server-side sideband
+  hands each request to a Claude orchestrator whose only tools are the supervisor's.
+  Merge, reject and cancel need a spoken yes, enforced in code with single-use
+  tokens. Tasks that start needing you get a one-line spoken nudge that waits for
+  silence.
 
 I verified this against the real agent: two parallel runs on the demo repo, one
 accepted and one conflicting, then conductor `kill -9`'d mid-run, restarted, and the
 run resumed to a passing result.
+
+Voice was verified against the real GPT-Live API with synthesized speech played in
+as the microphone. By voice I started a task, answered its agent's question, merged
+it after a spoken yes, and filtered the screen, and heard the notices arrive. A real
+microphone and room noise have not been tested yet.
 
 ## What I left out, and why
 
 - **Per-action approval.** Agents run with `bypassPermissions` inside the worktree.
   A real gate needs a `PreToolUse` hook that parks the run in `waiting_input`. The
   state machine already has the shape for it; the risk policy is the hard part.
-- **Voice layer.** Planned next (see below). I wanted the run model solid first,
-  because voice is just another client of the same API.
 - **Rebase/fix-conflict by the agent.** A conflicted run can be kept as a branch or
   rejected. Sending it back to the agent with "rebase onto main" is a small
   addition but needs a `conflict → queued` path and a fresh test pass.
@@ -40,12 +51,9 @@ run resumed to a passing result.
 
 ## With two more days
 
-1. **Voice.** Full-duplex GPT-Live (`gpt-live-1`) over WebRTC with client
-   delegation. The server attaches a sideband socket and hands each delegation to
-   a Claude orchestrator whose tools wrap the supervisor (list, describe, start,
-   fan out, answer, accept, reject). Destructive actions need a spoken
-   confirmation, and the server enforces it. Runs that need you get a one-line
-   nudge, not the full blocker. Plan: [VOICE_PLAN.md](VOICE_PLAN.md).
+1. **Voice, second pass.** Barge-in tuning with a real mic, a faster orchestrator
+   (answer simple questions from the snapshot without a model turn), and voice
+   confirmation for the new approval gate below.
 2. **Approval gate** via a `PreToolUse` hook, with a per-repo allowlist, so risky
    commands wait for a yes instead of running.
 3. **Agent-driven conflict resolution** and "re-run tests after my edit" on a kept
