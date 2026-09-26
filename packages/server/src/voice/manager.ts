@@ -7,6 +7,8 @@ import { errorMessage, type Logger } from '../supervisor/errors.ts';
 import { createLiveSession, type LiveSession, type VoiceConfig } from './live.ts';
 import { attachSideband, nodeWebSocket, type LiveEvent, type Sideband, type WebSocketFactory } from './sideband.ts';
 import { Transcript } from './transcript.ts';
+import { composeNotices, NoticeGate, type Notice } from './notifier.ts';
+import type { Run } from '@conductor/shared';
 
 export interface DelegationRequest {
   sessionId: string;
@@ -44,6 +46,14 @@ export interface VoiceManagerDeps {
   /** Wait before reading the transcript: the user's last words can arrive after the delegation. */
   settleMs?: number;
   closeTimeoutMs?: number;
+  /** Quiet time before a notice is spoken. */
+  silenceMs?: number;
+  /** How often queued notices are checked. */
+  noticeTickMs?: number;
+  /** Tasks that already need the user when a session opens (Conductor mentions them first). */
+  initialNotices?: () => Notice[];
+  /** Hold notices this long after a session opens, while its audio connects. */
+  startDelayMs?: number;
   log?: Logger;
 }
 
@@ -56,12 +66,17 @@ export interface VoiceSessionState {
 export interface VoiceManager {
   open(offerSdp: string): Promise<LiveSession>;
   get(sessionId: string): VoiceSessionState | undefined;
+  /** A task started needing the user: tell every open session, softly. */
+  notify(notice: Notice): void;
+  /** Any run changed (drops queued notices that no longer apply). */
+  runChanged(run: Run): void;
   /** Gracefully close every session (conductor shutdown). */
   closeAll(): Promise<void>;
 }
 
 /** Appended `content` is capped at 500 tokens; stay well under by characters. */
 const MAX_CONTENT_CHARS = 1500;
+const clip = (s: string) => (s.length > MAX_CONTENT_CHARS ? `${s.slice(0, MAX_CONTENT_CHARS - 1)}…` : s);
 
 export const voiceLog: Logger = {
   info: (m, ...r) => console.log(`[voice] ${m}`, ...r),
@@ -75,7 +90,7 @@ export function createVoiceManager(deps: VoiceManagerDeps): VoiceManager {
   const settleMs = deps.settleMs ?? 400;
   const closeTimeoutMs = deps.closeTimeoutMs ?? 3000;
   const log = deps.log ?? voiceLog;
-  const sessions = new Map<string, VoiceSessionState & { closed: Promise<void>; markClosed(): void }>();
+  const sessions = new Map<string, VoiceSessionState & { gate: NoticeGate; closed: Promise<void>; markClosed(): void }>();
   let eventSeq = 0;
   const eventId = (prefix: string) => `${prefix}_${++eventSeq}`;
 
@@ -83,8 +98,18 @@ export function createVoiceManager(deps: VoiceManagerDeps): VoiceManager {
     const transcript = new Transcript();
     let markClosed!: () => void;
     const closed = new Promise<void>((r) => { markClosed = r; });
+    const gate = new NoticeGate((notices) => {
+      const { commentary, thinking } = composeNotices(notices);
+      log.info(`${id}: notice → ${notices.map((n) => `${n.runId}:${n.state}`).join(', ')}`);
+      sideband.send({ type: 'session.thinking.append', event_id: eventId('notice_ctx'), delegation_id: null, content: clip(thinking) });
+      sideband.send({ type: 'session.commentary.append', event_id: eventId('notice'), delegation_id: null, content: clip(commentary) });
+    }, { silenceMs: deps.silenceMs, startDelayMs: deps.startDelayMs ?? 2000 });
+    for (const n of deps.initialNotices?.() ?? []) gate.push(n);
+    const timer = setInterval(() => gate.tick(), deps.noticeTickMs ?? 250);
+    timer.unref?.();
     const finish = () => {
       if (!sessions.has(id)) return;
+      clearInterval(timer);
       sessions.delete(id);
       backend.close?.(id);
       markClosed();
@@ -96,7 +121,7 @@ export function createVoiceManager(deps: VoiceManagerDeps): VoiceManager {
         finish();
       },
     }, deps.connect ?? nodeWebSocket);
-    sessions.set(id, { id, transcript, sideband, closed, markClosed: finish });
+    sessions.set(id, { id, transcript, sideband, gate, closed, markClosed: finish });
   }
 
   function onEvent(id: string, ev: LiveEvent): void {
@@ -105,9 +130,11 @@ export function createVoiceManager(deps: VoiceManagerDeps): VoiceManager {
     switch (ev.type) {
       case 'session.input_transcript.delta':
         s.transcript.add('user', ev as never);
+        s.gate.speech();
         break;
       case 'session.output_transcript.delta':
         s.transcript.add('assistant', ev as never);
+        s.gate.speech();
         break;
       case 'session.delegation.created': {
         const delegation = ev.delegation as { id?: string; target?: string } | undefined;
@@ -128,7 +155,16 @@ export function createVoiceManager(deps: VoiceManagerDeps): VoiceManager {
     }
   }
 
-  async function handleDelegation(s: VoiceSessionState, delegationId: string, offsetMs: number): Promise<void> {
+  async function handleDelegation(s: VoiceSessionState & { gate: NoticeGate }, delegationId: string, offsetMs: number): Promise<void> {
+    s.gate.delegation(1);
+    try {
+      await runDelegation(s, delegationId, offsetMs);
+    } finally {
+      s.gate.delegation(-1);
+    }
+  }
+
+  async function runDelegation(s: VoiceSessionState, delegationId: string, offsetMs: number): Promise<void> {
     if (settleMs > 0) await new Promise((r) => setTimeout(r, settleMs));
     let content: string;
     try {
@@ -138,8 +174,7 @@ export function createVoiceManager(deps: VoiceManagerDeps): VoiceManager {
       content = `That didn't work: ${errorMessage(err)}`;
     }
     log.info(`${s.id}: delegation ${delegationId} → ${JSON.stringify(content)}`);
-    if (content.length > MAX_CONTENT_CHARS) content = `${content.slice(0, MAX_CONTENT_CHARS - 1)}…`;
-    s.sideband.send({ type: 'session.commentary.append', event_id: eventId('result'), delegation_id: delegationId, content });
+    s.sideband.send({ type: 'session.commentary.append', event_id: eventId('result'), delegation_id: delegationId, content: clip(content) });
   }
 
   return {
@@ -152,6 +187,12 @@ export function createVoiceManager(deps: VoiceManagerDeps): VoiceManager {
       return live;
     },
     get: (id) => sessions.get(id),
+    notify(notice) {
+      for (const s of sessions.values()) s.gate.push(notice);
+    },
+    runChanged(run) {
+      for (const s of sessions.values()) s.gate.update(run);
+    },
     async closeAll() {
       const open = [...sessions.values()];
       for (const s of open) s.sideband.send({ type: 'session.close', event_id: eventId('close') });

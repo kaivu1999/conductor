@@ -168,4 +168,31 @@ describe('voice manager', () => {
     expect(ws.readyState).toBe(3);
     expect(m.get('live_9')).toBeUndefined();
   });
+
+  it('speaks queued notices after silence, as general context', async () => {
+    const m = createVoiceManager({ config: VOICE, fetch: answer, settleMs: 0, silenceMs: 30, noticeTickMs: 5, startDelayMs: 0, log: quiet, connect: (u, h) => new FakeSocket(u, h) });
+    cleanups.push(() => m.closeAll());
+    await m.open('v=0');
+    const ws = FakeSocket.last;
+    ws.accept();
+    m.notify({ runId: 'r_1', title: 'Add night mode', state: 'waiting_input', details: 'r_1 details' });
+    await new Promise((r) => setTimeout(r, 80));
+    expect(ws.sent.map((e) => [e.type, e.delegation_id])).toEqual([['session.thinking.append', null], ['session.commentary.append', null]]);
+    expect(ws.sent[1]!.content).toContain('"Add night mode" is blocked on a question');
+  });
+
+  it('opens with the tasks that already need the user, after the start delay', async () => {
+    const m = createVoiceManager({
+      config: VOICE, fetch: answer, silenceMs: 10, noticeTickMs: 5, startDelayMs: 60, log: quiet, connect: (u, h) => new FakeSocket(u, h),
+      initialNotices: () => [{ runId: 'r_1', title: 'Fix slugify', state: 'ready', details: '' }, { runId: 'r_2', title: 'Add flag', state: 'failed', details: '' }],
+    });
+    cleanups.push(() => m.closeAll());
+    await m.open('v=0');
+    const ws = FakeSocket.last;
+    ws.accept();
+    await new Promise((r) => setTimeout(r, 30));
+    expect(ws.sent).toEqual([]);
+    await new Promise((r) => setTimeout(r, 80));
+    expect(ws.sent.at(-1)!.content).toContain('2 tasks need the user');
+  });
 });

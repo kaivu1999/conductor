@@ -17,6 +17,7 @@ import { createSseHub } from './sse.ts';
 import { loadVoiceConfig } from '../voice/live.ts';
 import { createVoiceManager, voiceLog, type VoiceManager } from '../voice/manager.ts';
 import { createOrchestrator } from '../voice/orchestrator.ts';
+import { createAttentionWatcher, NUDGE_STATES, toNotice } from '../voice/notifier.ts';
 
 export interface ServerDeps {
   supervisor: ConductorSupervisor;
@@ -57,6 +58,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       model: process.env.CONDUCTOR_VOICE_AGENT_MODEL?.trim() || undefined,
       screen: (command) => hub.broadcast({ type: 'voice', command }),
     }),
+    initialNotices: () => sortByAttention(store.listRuns()).filter((r) => NUDGE_STATES.includes(r.state)).map(toNotice),
   });
   const app = Fastify({ logger: deps.logger ?? false, bodyLimit: 1024 * 1024 });
 
@@ -77,6 +79,8 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   const hub = createSseHub({ snapshot: async () => ({ type: 'system', system: await supervisor.systemInfo() }) });
   supervisor.on('run', (run) => hub.broadcast({ type: 'run', run }));
   supervisor.on('event', (event) => hub.broadcast({ type: 'event', event }));
+  const watchAttention = createAttentionWatcher(store.listRuns({ includeTerminal: true }), (n) => voice.notify(n));
+  supervisor.on('run', (run) => { voice.runChanged(run); watchAttention(run); });
   const systemTimer = setInterval(() => {
     if (!hub.size) return;
     supervisor.systemInfo().then((system) => hub.broadcast({ type: 'system', system }), () => {});
