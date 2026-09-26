@@ -40,12 +40,12 @@ run resumed to a passing result.
 
 ## With two more days
 
-1. **Voice.** A browser WebRTC session to the OpenAI Realtime API, with an
-   ephemeral token minted by the server. Its tools wrap the existing REST calls:
-   `list_attention`, `describe_run`, `answer_question`, `start_run`, `accept_run`,
-   and `fan_out`, where fan_out lets an orchestrator split one spoken request into
-   several runs. It would support mute and push-to-talk, and speak up only when a
-   run crosses into "needs you".
+1. **Voice.** Full-duplex GPT-Live (`gpt-live-1`) over WebRTC with client
+   delegation. The server attaches a sideband socket and hands each delegation to
+   a Claude orchestrator whose tools wrap the supervisor (list, describe, start,
+   fan out, answer, accept, reject). Destructive actions need a spoken
+   confirmation, and the server enforces it. Runs that need you get a one-line
+   nudge, not the full blocker. Plan: [VOICE_PLAN.md](VOICE_PLAN.md).
 2. **Approval gate** via a `PreToolUse` hook, with a per-repo allowlist, so risky
    commands wait for a yes instead of running.
 3. **Agent-driven conflict resolution** and "re-run tests after my edit" on a kept
