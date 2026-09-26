@@ -1,0 +1,8 @@
+{
+  "name": "@conductor/shared",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": { "typecheck": "tsc -p .", "test": "vitest run" },
+  "devDependencies": { "vitest": "^2.1.8" }
+}
