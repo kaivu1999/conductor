@@ -83,6 +83,10 @@ supervisor). `CONDUCTOR_LIVE=1 pnpm test` adds three tests that call the real ag
   message to a running agent.
 - **Review**: agent summary, test result with output, and the full diff (including
   new files). If another live run touches the same files, both show an overlap badge.
+- **Continue** (`c`): not quite right? Tell the agent what to change. It resumes its own
+  session in the same worktree, so it keeps its context and the work so far, and comes
+  back to review with the combined diff. Works on finished runs and on merge conflicts
+  (the agent is told why the merge failed, so "rebase onto main and resolve it" works).
 - **Accept & merge** creates a `--no-ff` merge commit on the base branch. **Keep
   branch only** leaves `conductor/<run-id>` for you to merge or open a PR. **Reject**
   deletes the worktree and branch.
@@ -94,7 +98,7 @@ supervisor). `CONDUCTOR_LIVE=1 pnpm test` adds three tests that call the real ag
 Press **Talk** (`v`) and talk to Conductor. Anything the app does, you can say:
 "what needs me?", "start two tasks in tictactoe: add night mode, and a score
 board", "start a new project called weather app: a CLI for the forecast",
-"tell it Markdown", "what did the slugify one change?", "merge it", "show me
+"tell it Markdown", "tell the night mode one to also add a toggle", "what did the slugify one change?", "merge it", "show me
 only what needs me". Conductor opens the task it's talking about on screen.
 
 - If Conductor can't tell which repo you mean, it asks, or opens the New run window

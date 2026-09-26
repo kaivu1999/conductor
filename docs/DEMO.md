@@ -101,7 +101,17 @@ it stopped."
 
 ---
 
-## 5. Merging safely (1.5 min)
+## 5. Merging safely (2 min)
+
+🗣 **You:** "Say the review isn't quite what I wanted. I don't have to reject it and start over."
+
+🎙 **To Conductor:** "Tell the night mode one to also add a toggle in the header."
+
+👀 **Expect:** *"Sent night mode back to its agent…"* The run goes from **Ready** to **Running**,
+then back to **Ready**, and the diff now includes both changes.
+
+🗣 **You:** "Same agent, same session, same branch. It kept its context and picked up where
+it stopped. In the app it's the **Continue** box, or `c`."
 
 🎙 **To Conductor:** "Merge the night mode task."
 
