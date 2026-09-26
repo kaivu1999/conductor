@@ -109,6 +109,8 @@ only what needs me". Conductor opens the task it's talking about on screen.
 
 Voice needs `OPENAI_API_KEY`; everything else works without it.
 
+Presenting it? [docs/DEMO.md](docs/DEMO.md) is a 10-minute live demo script.
+
 ## Architecture
 
 ```
