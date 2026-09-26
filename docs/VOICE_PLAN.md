@@ -1,6 +1,7 @@
 # Voice layer plan
 
-Status: designed, not built. This file is the hand-off for the implementation
+Status: step 1 of the build order is done (session minting, browser WebRTC,
+captions); steps 2–6 are next. This file is the hand-off for the implementation
 session: it covers the architecture, the decisions behind it, the GPT-Live API
 facts we depend on, and the build order.
 

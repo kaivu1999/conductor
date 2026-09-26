@@ -4,6 +4,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { loadConfig } from './config.ts';
 import { createSqliteStore } from './store/sqlite.ts';
 import { createGit } from './git/git.ts';
@@ -38,7 +39,14 @@ function acquireLock(lockPath: string): () => void {
   throw new Error(`could not acquire ${lockPath}`);
 }
 
+/** Load `.env` from the repo root, if present. Real env vars win over the file. */
+function loadDotEnv(): void {
+  const file = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../.env');
+  if (fs.existsSync(file)) process.loadEnvFile(file);
+}
+
 async function main(): Promise<void> {
+  loadDotEnv();
   const config = loadConfig();
   const releaseLock = acquireLock(path.join(config.dataDir, 'conductor.lock'));
   process.on('exit', releaseLock);
@@ -55,7 +63,7 @@ async function main(): Promise<void> {
   supervisor.startScheduler();
   const app = buildServer({ supervisor, store, git });
   await app.listen({ port: config.port, host: '127.0.0.1' });
-  console.log(`[conductor] agent=${agent.name} max=${config.maxConcurrent} home=${config.dataDir} → http://127.0.0.1:${config.port}`);
+  console.log(`[conductor] agent=${agent.name} max=${config.maxConcurrent} voice=${process.env.OPENAI_API_KEY ? 'on' : 'off'} home=${config.dataDir} → http://127.0.0.1:${config.port}`);
 
   let stopping = false;
   const stop = async (signal: string) => {

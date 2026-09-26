@@ -99,6 +99,17 @@ kbd { font-family: var(--mono); font-size: 10px; padding: 0 4px; border: 1px sol
 .offline-bar { background: var(--bad-bg); color: var(--bad); border-bottom: 1px solid rgba(255, 93, 93, 0.3); padding: 5px 14px; font-size: 12px; flex-shrink: 0; }
 .app--offline .panes { opacity: 0.7; }
 
+/* ---------- voice ---------- */
+.voice-btn__dot { width: 7px; height: 7px; border-radius: 50%; background: var(--fg-3); }
+.voice-btn--connecting .voice-btn__dot, .voice-btn--closing .voice-btn__dot { background: var(--warn); animation: blink 1s infinite; }
+.voice-btn--live { border-color: var(--good); color: var(--good); background: var(--good-bg); }
+.voice-btn--live .voice-btn__dot { background: var(--good); box-shadow: 0 0 6px var(--good); }
+.captions { display: flex; flex-direction: column; gap: 2px; padding: 6px 14px; border-bottom: 1px solid var(--line); background: var(--bg-1); font-size: 13px; max-height: 132px; overflow: hidden; justify-content: flex-end; flex-shrink: 0; }
+.caption { display: flex; gap: 10px; line-height: 1.45; }
+.caption__who { flex: 0 0 72px; color: var(--fg-3); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; padding-top: 2px; }
+.caption--user .caption__text { color: var(--fg-2); }
+.caption--assistant .caption__text { color: var(--fg); }
+
 .panes { flex: 1; display: grid; grid-template-columns: minmax(360px, 34%) 1fr; min-height: 0; transition: opacity 0.2s; }
 .pane { min-height: 0; overflow: auto; }
 .pane--list { border-right: 1px solid var(--line); background: var(--bg); }

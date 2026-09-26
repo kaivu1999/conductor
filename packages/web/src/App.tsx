@@ -8,6 +8,7 @@ import { ToastProvider } from './components/Toasts.tsx';
 import { GROUP_ORDER, groupOf } from './stateMeta.ts';
 import { store, useConductor, useNow } from './useConductor.ts';
 import { useHashSelection } from './useHashSelection.ts';
+import { Captions } from './voice/VoiceControls.tsx';
 
 export function App() {
   return (
@@ -92,6 +93,7 @@ function Shell() {
       {conn === 'reconnecting' && (
         <div className="offline-bar">Lost connection to the conductor server — showing last known state. Reconnecting automatically…</div>
       )}
+      <Captions />
       <main className="panes">
         <aside className="pane pane--list">
           {!loaded ? <div className="muted pad">Loading runs…</div> : (

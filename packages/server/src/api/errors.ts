@@ -1,11 +1,13 @@
 import { ZodError } from 'zod';
 import { SupervisorError } from '../supervisor/errors.ts';
+import { VoiceError } from '../voice/live.ts';
 
 const STATUS = { bad_request: 400, not_found: 404, conflict: 409, failed: 500 } as const;
 
 /** Map a thrown value to an HTTP status + message a human can act on. */
 export function toHttpError(err: unknown): { status: number; error: string; expected: boolean } {
   if (err instanceof SupervisorError) return { status: STATUS[err.code], error: err.message, expected: err.code !== 'failed' };
+  if (err instanceof VoiceError) return { status: err.status, error: err.message, expected: err.status < 500 };
   if (err instanceof ZodError) {
     const error = err.issues.map((i) => (i.path.length ? `${i.path.join('.')}: ${i.message}` : i.message)).join('; ');
     return { status: 400, error, expected: true };

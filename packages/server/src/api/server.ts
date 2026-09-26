@@ -14,6 +14,7 @@ import type { ConductorSupervisor } from '../supervisor/supervisor.ts';
 import { notFound, conflict } from '../supervisor/errors.ts';
 import { toHttpError } from './errors.ts';
 import { createSseHub } from './sse.ts';
+import { createLiveSession, loadVoiceConfig, type VoiceConfig } from '../voice/live.ts';
 
 export interface ServerDeps {
   supervisor: ConductorSupervisor;
@@ -24,6 +25,10 @@ export interface ServerDeps {
   webDist?: string;
   logger?: boolean;
   systemEveryMs?: number;
+  /** GPT-Live settings (default: from process.env). */
+  voice?: VoiceConfig;
+  /** Injected for tests. */
+  fetch?: typeof fetch;
 }
 
 const CreateRunBody = z.object({
@@ -37,12 +42,14 @@ const MessageBody = z.object({ text: z.string().trim().min(1, 'message is empty'
 const AcceptBody = z.object({ mode: z.enum(['merge', 'branch']).default('merge') }).default({});
 const IdParams = z.object({ id: z.string().min(1) });
 const EventsQuery = z.object({ after: z.coerce.number().int().min(0).default(0), limit: z.coerce.number().int().min(1).max(5000).default(1000) });
+const VoiceSessionBody = z.object({ sdp: z.string().min(1, 'sdp is required').max(100_000) });
 const InspectQuery = z.object({ path: z.string().trim().min(1, 'path is required') });
 
 const DEFAULT_WEB_DIST = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../web/dist');
 
 export function buildServer(deps: ServerDeps): FastifyInstance {
   const { supervisor, store, git } = deps;
+  const voice = deps.voice ?? loadVoiceConfig();
   const app = Fastify({ logger: deps.logger ?? false, bodyLimit: 1024 * 1024 });
 
   const getRun = (id: string): Run => {
@@ -129,6 +136,11 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     api.get('/repos/inspect', async (req) => git.inspectRepo(InspectQuery.parse(req.query).path));
 
     api.get('/system', async () => supervisor.systemInfo());
+
+    api.post('/voice/session', async (req) => {
+      const { sdp } = VoiceSessionBody.parse(req.body ?? {});
+      return createLiveSession(voice, sdp, deps.fetch);
+    });
 
     api.get('/stream', (req, reply: FastifyReply) => hub.handle(req, reply));
 

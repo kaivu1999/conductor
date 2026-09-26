@@ -2,6 +2,7 @@ import type { SystemInfo } from '@conductor/shared';
 import { bytes } from '../format.ts';
 import type { ConnState } from '../store.ts';
 import { isMock } from '../useConductor.ts';
+import { VoiceButton } from '../voice/VoiceControls.tsx';
 
 const DISK_WARN = 5 * 1024 ** 3;
 
@@ -51,6 +52,8 @@ export function Header({ system, needs, filterNeeds, onToggleNeeds, conn, droppe
       )}
 
       <Conn conn={conn} droppedAt={droppedAt} nextRetryAt={nextRetryAt} now={now} onRetry={onRetry} />
+
+      <VoiceButton />
 
       <button className="btn btn--primary" onClick={onNew}>New run <kbd>n</kbd></button>
     </header>
