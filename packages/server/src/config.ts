@@ -13,9 +13,11 @@ function int(env: NodeJS.ProcessEnv, key: string, def: number, min = 1): number 
 
 /**
  * Env overrides; creates dataDir and worktreeRoot. Throws a readable error on bad values.
+ * Default home is ~/.conductor-runs, NOT ~/.conductor: that belongs to Conductor.app
+ * (conductor.build), and our reaper deletes unowned dirs under worktrees/.
  */
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
-  const home = env.CONDUCTOR_HOME?.trim() ? env.CONDUCTOR_HOME.trim() : path.join(os.homedir(), '.conductor');
+  const home = env.CONDUCTOR_HOME?.trim() ? env.CONDUCTOR_HOME.trim() : path.join(os.homedir(), '.conductor-runs');
   const dataDir = path.resolve(home.startsWith('~/') ? path.join(os.homedir(), home.slice(2)) : home);
   const worktreeRoot = path.join(dataDir, 'worktrees');
   let maxBudgetUsd: number | undefined;

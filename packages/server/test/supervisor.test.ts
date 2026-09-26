@@ -290,6 +290,18 @@ describe('accept / reject', () => {
     expect(h.store.getRun(r2.id)!.worktreePath).toBeNull();
   });
 
+  it('reaper deletes unowned run-id dirs but never foreign dirs in the worktree root', async () => {
+    const h = harness();
+    const root = h.config.worktreeRoot;
+    const ours = path.join(root, 'r_abc123'); // looks like a run id, no run in the DB
+    const foreign = path.join(root, 'someones-project'); // e.g. another tool sharing the dir
+    for (const d of [ours, foreign]) fs.mkdirSync(d, { recursive: true });
+    h.git.diskEntries.push({ path: ours }, { path: foreign });
+    expect(await h.sup.reap()).toBe(1);
+    expect(fs.existsSync(ours)).toBe(false);
+    expect(fs.existsSync(foreign)).toBe(true);
+  });
+
   it('reject a live run stops the agent first', async () => {
     const h = harness();
     h.sup.startScheduler();
@@ -424,7 +436,7 @@ describe('recover()', () => {
 
   it('prunes orphan worktree dirs and terminal runs\' leftover worktrees', async () => {
     const h = harness();
-    const strayDir = path.join(h.config.worktreeRoot, 'r_stray');
+    const strayDir = path.join(h.config.worktreeRoot, 'r_stray1');
     fs.mkdirSync(strayDir);
     fs.writeFileSync(path.join(strayDir, 'f'), 'x');
     h.git.diskEntries.push({ path: strayDir });

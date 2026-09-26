@@ -9,6 +9,8 @@ import { TERMINAL_STATES, WORKTREE_STATES, type DiskUsage } from '@conductor/sha
 import { errorMessage } from './errors.ts';
 import type { SupervisorContext } from './context.ts';
 
+const RUN_ID_RE = /^r_[0-9a-z]{6}$/;
+
 export async function reapWorktrees(ctx: SupervisorContext): Promise<{ pruned: number; usage: DiskUsage }> {
   const { store, git, log, w } = ctx;
   let pruned = 0;
@@ -37,6 +39,9 @@ export async function reapWorktrees(ctx: SupervisorContext): Promise<{ pruned: n
     // Worktrees live at <root>/<runId>. The DB may not have the path yet (createWorktree is in
     // flight), so decide ownership by the run the directory is named after, not by path.
     const id = path.basename(dir);
+    // Only ever touch directories named like our run ids. Anything else in the root was put
+    // there by someone else (a user, another tool sharing the dir) and is not ours to delete.
+    if (!RUN_ID_RE.test(id)) continue;
     const owner = store.getRun(id);
     if (ctx.busy(id) || (owner && (owner.state === 'queued' || WORKTREE_STATES.includes(owner.state)))) continue;
     try {

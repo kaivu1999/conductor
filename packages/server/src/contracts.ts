@@ -125,9 +125,9 @@ export interface Supervisor {
 }
 
 export interface Config {
-  dataDir: string; // ~/.conductor
-  worktreeRoot: string; // ~/.conductor/worktrees
-  dbPath: string; // ~/.conductor/conductor.db
+  dataDir: string; // ~/.conductor-runs
+  worktreeRoot: string; // ~/.conductor-runs/worktrees
+  dbPath: string; // ~/.conductor-runs/conductor.db
   port: number;
   maxConcurrent: number;
   testTimeoutMs: number;
