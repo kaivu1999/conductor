@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addFragment, type Speaker, type TranscriptLine } from './transcript.ts';
+import { addFragment, stripNonSpeech, type Speaker, type TranscriptLine } from './transcript.ts';
 
 function fold(frags: [Speaker, string, number, number][], max?: number): string[] {
   let lines: TranscriptLine[] = [];
@@ -35,4 +35,14 @@ describe('addFragment', () => {
   it('keeps only the last `max` lines', () => {
     expect(fold([['user', 'a', 0, 1], ['user', 'b', 5000, 5001], ['user', 'c', 10000, 10001]], 2)).toEqual(['user: b', 'user: c']);
   });
+});
+
+describe('stripNonSpeech', () => {
+  it.each([
+    ['[clear throat] What needs me?', 'What needs me?'],
+    ['details [clear throat', 'details'],
+    ['Merge it (laughs) please', 'Merge it please'],
+    ['[cough]', ''],
+    ['plain words', 'plain words'],
+  ])('%s', (input, out) => expect(stripNonSpeech(input)).toBe(out));
 });

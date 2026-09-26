@@ -1,4 +1,4 @@
-import { addFragment, type Speaker, type TranscriptDelta, type TranscriptLine } from '@conductor/shared';
+import { addFragment, stripNonSpeech, type Speaker, type TranscriptDelta, type TranscriptLine } from '@conductor/shared';
 
 /** Keep enough history for "yes", "the second one", and "no, Thursday". */
 const MAX_LINES = 200;
@@ -17,14 +17,18 @@ export class Transcript {
     return this.lines;
   }
 
-  /** The user's most recent line, or null. */
+  /** The user's most recent line with actual words, or null. */
   lastUser(): TranscriptLine | null {
-    for (let i = this.lines.length - 1; i >= 0; i--) if (this.lines[i]!.role === 'user') return this.lines[i]!;
+    for (let i = this.lines.length - 1; i >= 0; i--) {
+      const l = this.lines[i]!;
+      if (l.role === 'user' && stripNonSpeech(l.text)) return { ...l, text: stripNonSpeech(l.text) };
+    }
     return null;
   }
 
-  /** Last `n` lines as `user: …` / `assistant: …`, for a backend prompt. */
+  /** Last `n` spoken lines as `user: …` / `assistant: …`, for a backend prompt. Non-speech tags dropped. */
   render(n = 20): string {
-    return this.lines.slice(-n).map((l) => `${l.role}: ${l.text.trim()}`).join('\n');
+    return this.lines.map((l) => ({ ...l, text: stripNonSpeech(l.text) })).filter((l) => l.text)
+      .slice(-n).map((l) => `${l.role}: ${l.text}`).join('\n');
   }
 }

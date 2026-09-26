@@ -41,6 +41,16 @@ describe('ConfirmGate', () => {
     expect(gate.redeem(token, 'accept_merge', 'r_1', t).ok).toBe(false); // single use
   });
 
+  it('ignores non-speech lines between the question and the answer', () => {
+    const gate = new ConfirmGate();
+    const t = new Transcript();
+    const token = gate.issue('reject', 'r_1', t);
+    talk(t, 'user', '[clear throat]');
+    expect(gate.redeem(token, 'reject', 'r_1', t)).toMatchObject({ ok: false, reason: expect.stringMatching(/not answered/) });
+    talk(t, 'user', 'Yes.');
+    expect(gate.redeem(token, 'reject', 'r_1', t)).toEqual({ ok: true });
+  });
+
   it('refuses after a no, and after the TTL', () => {
     let now = 0;
     const gate = new ConfirmGate(60_000, () => now);

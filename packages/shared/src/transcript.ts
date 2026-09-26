@@ -40,3 +40,11 @@ export function addFragment(lines: TranscriptLine[], role: Speaker, d: Transcrip
   const line = { id: nextId, role, text: d.delta.trimStart(), startMs: d.start_ms ?? end, endMs: end };
   return [...lines, line].slice(-max);
 }
+
+/**
+ * Drop non-speech tags the transcriber inserts ("[clear throat]", "(laughs)"), including one
+ * cut off at the end of a line that's still arriving ("[clear throat").
+ */
+export function stripNonSpeech(text: string): string {
+  return text.replace(/\[[^\]]*(\]|$)|\([^)]*(\)|$)/g, ' ').replace(/\s+/g, ' ').trim();
+}

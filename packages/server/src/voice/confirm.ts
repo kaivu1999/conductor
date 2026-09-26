@@ -5,6 +5,7 @@
  * question was issued.
  */
 import { randomBytes } from 'node:crypto';
+import { stripNonSpeech } from '@conductor/shared';
 import type { Transcript } from './transcript.ts';
 
 export type ConfirmAction = 'accept_merge' | 'accept_branch' | 'reject' | 'cancel';
@@ -45,11 +46,12 @@ export class ConfirmGate {
       return { ok: false, reason: 'The confirmation expired. Ask the user again (call without a token).' };
     }
     // The yes must come from the user, after the question was put to them.
-    const reply = transcript.all().filter((l) => l.role === 'user' && l.id > p.afterLineId).at(-1);
+    // Only lines with words count: a cough or "[clear throat]" is not an answer.
+    const reply = transcript.all().filter((l) => l.role === 'user' && l.id > p.afterLineId).map((l) => stripNonSpeech(l.text)).filter(Boolean).at(-1);
     if (!reply) return { ok: false, reason: 'The user has not answered the confirmation yet. Wait for a clear yes.' };
-    if (!saidYes(reply.text)) {
+    if (!saidYes(reply)) {
       this.pending.delete(token);
-      return { ok: false, reason: `The user did not clearly confirm (they said "${reply.text.trim()}"). Do not proceed unless they ask again.` };
+      return { ok: false, reason: `The user did not clearly confirm (they said "${reply}"). Do not proceed unless they ask again.` };
     }
     this.pending.delete(token);
     return { ok: true };
