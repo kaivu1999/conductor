@@ -3,18 +3,12 @@
  * `oai-events` data channel. It only carries audio and draws text. It never acts on
  * delegations; the server's sideband connection owns those (docs/VOICE_PLAN.md).
  */
+import { addFragment, type TranscriptDelta, type TranscriptLine } from '@conductor/shared';
 import { ApiError } from '../api.ts';
 
 export type VoiceStatus = 'idle' | 'connecting' | 'live' | 'closing';
 
-export interface Caption {
-  id: number;
-  role: 'user' | 'assistant';
-  text: string;
-  startMs: number;
-  /** Session-relative ms of the last fragment; a new fragment close after it extends this line. */
-  endMs: number;
-}
+export type Caption = TranscriptLine;
 
 export interface VoiceState {
   status: VoiceStatus;
@@ -23,32 +17,7 @@ export interface VoiceState {
 }
 
 const MAX_CAPTIONS = 6;
-/** Fragments from the same speaker within this gap join one caption line. */
-const JOIN_GAP_MS = 1200;
 const CLOSE_TIMEOUT_MS = 3000;
-
-interface TranscriptDelta { delta: string; start_ms?: number; end_ms?: number }
-
-/**
- * Fold one transcript fragment into the caption list. Pure, for tests.
- * Full duplex means lines interleave (a backchannel mid-sentence), so a fragment joins the
- * speaker's latest line unless there was a pause, or the other side spoke a whole line in between.
- */
-export function addFragment(captions: Caption[], role: Caption['role'], d: TranscriptDelta, nextId: number): Caption[] {
-  const start = d.start_ms ?? Number.MAX_SAFE_INTEGER;
-  const end = d.end_ms ?? d.start_ms ?? 0;
-  for (let i = captions.length - 1; i >= 0; i--) {
-    const c = captions[i]!;
-    if (c.role !== role) continue;
-    const turnBetween = captions.slice(i + 1).some((o) => o.startMs >= c.endMs && o.endMs <= start);
-    if (turnBetween || start - c.endMs > JOIN_GAP_MS) break;
-    const next = captions.slice();
-    next[i] = { ...c, text: c.text + d.delta, endMs: Math.max(c.endMs, end) };
-    return next;
-  }
-  const line = { id: nextId, role, text: d.delta.trimStart(), startMs: d.start_ms ?? end, endMs: end };
-  return [...captions, line].slice(-MAX_CAPTIONS);
-}
 
 export class VoiceSession {
   private state: VoiceState = { status: 'idle', captions: [], error: null };
@@ -144,7 +113,7 @@ export class VoiceSession {
 
   private caption(role: Caption['role'], d: TranscriptDelta) {
     if (typeof d.delta !== 'string' || !d.delta) return;
-    this.set({ captions: addFragment(this.state.captions, role, d, this.captionId++) });
+    this.set({ captions: addFragment(this.state.captions, role, d, this.captionId++, MAX_CAPTIONS) });
   }
 
   private fail(message: string) {
