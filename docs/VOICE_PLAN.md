@@ -1,11 +1,16 @@
 # Voice layer plan
 
-Status: steps 1–2 of the build order are done (session minting, browser WebRTC,
-captions, sideband with an echo delegate); steps 3–6 are next. This file is the hand-off for the implementation
+Status: steps 1–3 of the build order are done (session minting, browser WebRTC,
+captions, sideband, orchestrator with read-only tools); steps 4–6 are next. This file is the hand-off for the implementation
 session: it covers the architecture, the decisions behind it, the GPT-Live API
 facts we depend on, and the build order.
 
 ## Goal
+
+**Persona.** The voice is Conductor itself, the conductor of an orchestra of coding
+agents, built by Kaivu. It never names the models or companies behind it. Talking to it
+should feel like talking to the whole app: anything the UI can do, voice can do, including
+screen actions like opening a task or showing only what needs you.
 
 The whole app works by voice: start runs, hear what needs you, answer an agent's
 question, accept or reject a change. Notifications are soft. A blocked run gets a
@@ -115,6 +120,7 @@ All tools call the supervisor and store in-process (no HTTP hop):
 - `answer_question({run, answer})` and `message_run({run, text})`.
 - `accept_run({run, mode: "merge" | "branch", confirm_token?})`, `reject_run({run, confirm_token?})`, `cancel_run({run, confirm_token?})`.
 - `restart_run({run})`.
+- Screen: `show_run({run})` opens a task in the UI, `show_needs({on})` toggles the "needs you" filter. Sent to the browser over SSE.
 
 Results are short and factual ("Started 'Add night mode' in tictactoe."). The
 orchestrator reports an action as done only after the supervisor confirms it.

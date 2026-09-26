@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import { afterEach, describe, expect, it } from 'vitest';
 import { buildServer } from '../src/api/server.ts';
 import type { VoiceConfig } from '../src/voice/live.ts';
-import { createVoiceManager, type Delegate } from '../src/voice/manager.ts';
+import { createVoiceManager, type VoiceBackend } from '../src/voice/manager.ts';
 import type { LiveEvent, WebSocketLike } from '../src/voice/sideband.ts';
 import { makeHarness } from './helpers/index.ts';
 
@@ -94,9 +94,9 @@ describe('voice manager', () => {
   const answer = reply(201, { session: { id: 'live_9' }, transport: { type: 'webrtc', sdp: 'v=0 answer' } });
   const settle = () => new Promise((r) => setTimeout(r, 20));
 
-  function manager(delegate?: Delegate) {
+  function manager(delegate?: VoiceBackend['delegate']) {
     const m = createVoiceManager({
-      config: VOICE, fetch: answer, delegate, settleMs: 0, closeTimeoutMs: 50, log: quiet,
+      config: VOICE, fetch: answer, backend: delegate && { delegate }, settleMs: 0, closeTimeoutMs: 50, log: quiet,
       connect: (url, headers) => new FakeSocket(url, headers),
     });
     cleanups.push(() => m.closeAll());

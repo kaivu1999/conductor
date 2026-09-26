@@ -15,7 +15,8 @@ import { notFound, conflict } from '../supervisor/errors.ts';
 import { toHttpError } from './errors.ts';
 import { createSseHub } from './sse.ts';
 import { loadVoiceConfig } from '../voice/live.ts';
-import { createVoiceManager, type VoiceManager } from '../voice/manager.ts';
+import { createVoiceManager, voiceLog, type VoiceManager } from '../voice/manager.ts';
+import { createOrchestrator } from '../voice/orchestrator.ts';
 
 export interface ServerDeps {
   supervisor: ConductorSupervisor;
@@ -48,7 +49,10 @@ const DEFAULT_WEB_DIST = path.resolve(path.dirname(fileURLToPath(import.meta.url
 
 export function buildServer(deps: ServerDeps): FastifyInstance {
   const { supervisor, store, git } = deps;
-  const voice = deps.voice ?? createVoiceManager({ config: loadVoiceConfig() });
+  const voice = deps.voice ?? createVoiceManager({
+    config: loadVoiceConfig(),
+    backend: createOrchestrator({ store, model: process.env.CONDUCTOR_VOICE_AGENT_MODEL?.trim() || undefined, log: voiceLog }),
+  });
   const app = Fastify({ logger: deps.logger ?? false, bodyLimit: 1024 * 1024 });
 
   const getRun = (id: string): Run => {
